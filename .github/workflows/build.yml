@@ -105,7 +105,7 @@ jobs:
         Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.sln -Recurse | ForEach-Object {
           $solutionFile = $_.FullName
           Write-Host "Building solution: $solutionFile"
-          msbuild $solutionFile /t:rebuild /p:Configuration=${{ matrix.configuration }} /p:Platform="${{ matrix.platform }}" /m /v:detailed /fl /flp:logfile=msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log;verbosity=diagnostic
+          msbuild $solutionFile /t:rebuild /p:Configuration=${{ matrix.configuration }} /p:Platform="${{ matrix.platform }}" /m /v:detailed /fl "/flp:logfile=msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log;verbosity=diagnostic"
         }
       shell: pwsh
 
