@@ -32,10 +32,17 @@ jobs:
           "--add", "Microsoft.Net.Component.4.8.SDK", `
           "--add", "Microsoft.Net.Component.4.7.2.TargetingPack", `
           "--add", "Microsoft.VisualStudio.Component.Windows10SDK.19041", `
+          "--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", `
+          "--add", "Microsoft.VisualStudio.Component.VC.ATL", `
           "--includeRecommended", `
           "--quiet", "--norestart", "--wait" `
           -NoNewWindow -Wait
       shell: pwsh
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v1
+      with:
+        dotnet-version: '5.0.x'  # Adjust version as needed
 
     - name: Cache Visual Studio installation
       uses: actions/cache@v2
@@ -56,8 +63,9 @@ jobs:
     - name: Setup NuGet
       uses: NuGet/setup-nuget@v1
 
-    - name: Restore NuGet packages
+    - name: Clear NuGet cache and restore packages
       run: |
+        nuget locals all -clear
         Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.sln -Recurse | ForEach-Object {
           nuget restore $_.FullName -Verbosity detailed
         }
