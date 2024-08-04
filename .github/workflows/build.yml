@@ -11,8 +11,15 @@ jobs:
     runs-on: windows-latest
     
     steps:
-    - uses: actions/checkout@v2
-    
+    - name: Checkout current repository
+      uses: actions/checkout@v2
+
+    - name: Checkout CasioEmuMsvc repository
+      uses: actions/checkout@v2
+      with:
+        repository: telecomadm1145/CasioEmuMsvc
+        path: CasioEmuMsvc
+
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v1.1
 
@@ -24,9 +31,26 @@ jobs:
         choco install visualstudio2022-workload-vctools -y
         choco install visualstudio2022buildtools -y
     
+    - name: Find solution file
+      run: |
+        $solutionFile = Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.sln -Recurse | Select-Object -First 1 -ExpandProperty FullName
+        echo "SOLUTION_FILE=$solutionFile" >> $env:GITHUB_ENV
+      shell: pwsh
+    
     - name: Build solution
       run: |
-        msbuild CasioEmuMsvc.sln /p:Configuration=Release /p:Platform="x64" /m
+        if (-not $env:SOLUTION_FILE) {
+          Write-Error "No .sln file found in the CasioEmuMsvc repository"
+          exit 1
+        }
+        msbuild $env:SOLUTION_FILE /p:Configuration=Release /p:Platform="x64" /m
+      shell: pwsh
+    
+    - name: Find build output
+      run: |
+        $buildOutput = Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.exe -Recurse | Where-Object { $_.FullName -like "*\x64\Release\*" } | Select-Object -First 1 -ExpandProperty FullName
+        echo "BUILD_OUTPUT=$buildOutput" >> $env:GITHUB_ENV
+      shell: pwsh
     
     - name: Create Release
       id: create_release
@@ -34,8 +58,8 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: release-${{ github.run_number }}
-        release_name: Release ${{ github.run_number }}
+        tag_name: casioemumsvc-release-${{ github.run_number }}
+        release_name: CasioEmuMsvc Release ${{ github.run_number }}
         draft: false
         prerelease: false
 
@@ -45,9 +69,16 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./x64/Release/CasioEmuMsvc.exe
+        asset_path: ${{ env.BUILD_OUTPUT }}
         asset_name: CasioEmuMsvc.exe
         asset_content_type: application/octet-stream
+
+    - name: Zip Release Files
+      run: |
+        $releaseFolder = "${{ env.BUILD_OUTPUT }}" | Split-Path
+        Compress-Archive -Path "$releaseFolder\*" -DestinationPath "$releaseFolder\CasioEmuMsvc-Full.zip"
+        echo "ZIP_FILE=$releaseFolder\CasioEmuMsvc-Full.zip" >> $env:GITHUB_ENV
+      shell: pwsh
 
     - name: Upload Additional Files
       uses: actions/upload-release-asset@v1
@@ -55,6 +86,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./x64/Release/
+        asset_path: ${{ env.ZIP_FILE }}
         asset_name: CasioEmuMsvc-Hieuxyz.zip
         asset_content_type: application/zip
