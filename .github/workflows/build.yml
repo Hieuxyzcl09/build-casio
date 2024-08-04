@@ -7,63 +7,143 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  setup:
     runs-on: windows-latest
-    
     steps:
-    - name: Checkout current repository
-      uses: actions/checkout@v2
-
-    - name: Checkout CasioEmuMsvc repository
+    - name: Checkout repositories
       uses: actions/checkout@v2
       with:
         repository: telecomadm1145/CasioEmuMsvc
         path: CasioEmuMsvc
 
-    - name: Add msbuild to PATH
+    - name: Setup Visual Studio
       uses: microsoft/setup-msbuild@v1.1
+      with:
+        vs-version: '[17.0,18.0)'
 
-    - name: Setup Visual Studio Developer Command Prompt
-      uses: ilammy/msvc-dev-cmd@v1
-      
-    - name: Install Visual Studio SDK
+    - name: Install Visual Studio components and SDK
       run: |
-        choco install visualstudio2022-workload-vctools -y
-        choco install visualstudio2022buildtools -y
-    
-    - name: Find solution file
-      run: |
-        $solutionFile = Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.sln -Recurse | Select-Object -First 1 -ExpandProperty FullName
-        echo "SOLUTION_FILE=$solutionFile" >> $env:GITHUB_ENV
+        Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_enterprise.exe" -OutFile "$env:TEMP\vs_enterprise.exe"
+        Start-Process -FilePath "$env:TEMP\vs_enterprise.exe" -ArgumentList `
+          "--installPath", "C:\VS2022", `
+          "--add", "Microsoft.VisualStudio.Workload.NativeDesktop", `
+          "--add", "Microsoft.VisualStudio.Workload.ManagedDesktop", `
+          "--add", "Microsoft.VisualStudio.Workload.Universal", `
+          "--add", "Microsoft.Net.Component.4.8.SDK", `
+          "--add", "Microsoft.Net.Component.4.7.2.TargetingPack", `
+          "--add", "Microsoft.VisualStudio.Component.Windows10SDK.19041", `
+          "--includeRecommended", `
+          "--quiet", "--norestart", "--wait" `
+          -NoNewWindow -Wait
       shell: pwsh
 
-    - name: Install latest NuGet
-      run: |
-        $nugetUrl = "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe"
-        Invoke-WebRequest -Uri $nugetUrl -OutFile nuget.exe
-        echo "$env:GITHUB_WORKSPACE" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-      shell: pwsh
+    - name: Cache Visual Studio installation
+      uses: actions/cache@v2
+      with:
+        path: C:\VS2022
+        key: vs2022-cache-${{ runner.os }}-${{ hashFiles('**/vs_enterprise.exe') }}
+
+  restore_packages:
+    needs: setup
+    runs-on: windows-latest
+    steps:
+    - name: Checkout repositories
+      uses: actions/checkout@v2
+      with:
+        repository: telecomadm1145/CasioEmuMsvc
+        path: CasioEmuMsvc
+
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v1
 
     - name: Restore NuGet packages
       run: |
-        nuget restore $env:SOLUTION_FILE
-      shell: pwsh
-    
-    - name: Build solution
-      run: |
-        if (-not $env:SOLUTION_FILE) {
-          Write-Error "No .sln file found in the CasioEmuMsvc repository"
-          exit 1
+        Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.sln -Recurse | ForEach-Object {
+          nuget restore $_.FullName -Verbosity detailed
         }
-        msbuild $env:SOLUTION_FILE /t:restore,rebuild /p:Configuration=Release /p:Platform="x64" /m
       shell: pwsh
-    
-    - name: Find build output
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v2
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('**/packages.config') }}
+        restore-keys: |
+          nuget-${{ runner.os }}-
+
+  build:
+    needs: restore_packages
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
+        platform: [x86, x64]
+    steps:
+    - name: Checkout repositories
+      uses: actions/checkout@v2
+      with:
+        repository: telecomadm1145/CasioEmuMsvc
+        path: CasioEmuMsvc
+
+    - name: Setup Visual Studio Developer Command Prompt
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Restore cached Visual Studio installation
+      uses: actions/cache@v2
+      with:
+        path: C:\VS2022
+        key: vs2022-cache-${{ runner.os }}-${{ hashFiles('**/vs_enterprise.exe') }}
+
+    - name: Restore cached NuGet packages
+      uses: actions/cache@v2
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('**/packages.config') }}
+
+    - name: Build all projects
       run: |
-        $buildOutput = Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.exe -Recurse | Where-Object { $_.FullName -like "*\x64\Release\*" } | Select-Object -First 1 -ExpandProperty FullName
-        echo "BUILD_OUTPUT=$buildOutput" >> $env:GITHUB_ENV
+        Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.sln -Recurse | ForEach-Object {
+          $solutionFile = $_.FullName
+          Write-Host "Building solution: $solutionFile"
+          msbuild $solutionFile /t:rebuild /p:Configuration=${{ matrix.configuration }} /p:Platform="${{ matrix.platform }}" /m /v:detailed /fl /flp:logfile=msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log;verbosity=diagnostic
+        }
       shell: pwsh
-    
+
+    - name: Upload build logs
+      uses: actions/upload-artifact@v2
+      with:
+        name: build-logs-${{ matrix.configuration }}-${{ matrix.platform }}
+        path: msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log
+
+    - name: Collect build outputs
+      run: |
+        $outputDir = "$env:GITHUB_WORKSPACE\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}"
+        New-Item -ItemType Directory -Force -Path $outputDir
+        Get-ChildItem -Path "$env:GITHUB_WORKSPACE\CasioEmuMsvc" -Recurse | Where-Object { $_.FullName -like "*\${{ matrix.platform }}\${{ matrix.configuration }}\*" } | ForEach-Object { 
+          $targetPath = $_.FullName -replace [regex]::Escape("$env:GITHUB_WORKSPACE\CasioEmuMsvc"), $outputDir
+          $targetDir = Split-Path -Parent $targetPath
+          if (!(Test-Path $targetDir)) {
+            New-Item -ItemType Directory -Force -Path $targetDir
+          }
+          Copy-Item $_.FullName -Destination $targetPath -Force
+        }
+      shell: pwsh
+
+    - name: Upload build outputs
+      uses: actions/upload-artifact@v2
+      with:
+        name: build-outputs-${{ matrix.configuration }}-${{ matrix.platform }}
+        path: ${{ github.workspace }}\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}
+
+  create_release:
+    needs: build
+    runs-on: windows-latest
+    steps:
+    - name: Download all build outputs
+      uses: actions/download-artifact@v2
+      with:
+        path: BuildOutputs
+
     - name: Create Release
       id: create_release
       uses: actions/create-release@v1
@@ -75,29 +155,30 @@ jobs:
         draft: false
         prerelease: false
 
+    - name: Zip Release Files
+      run: |
+        $releaseFolder = "$env:GITHUB_WORKSPACE\BuildOutputs"
+        Compress-Archive -Path "$releaseFolder\*" -DestinationPath "$releaseFolder\CasioEmuMsvc-Full.zip"
+        echo "ZIP_FILE=$releaseFolder\CasioEmuMsvc-Full.zip" >> $env:GITHUB_ENV
+      shell: pwsh
+
     - name: Upload Release Asset
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ${{ env.BUILD_OUTPUT }}
-        asset_name: CasioEmuMsvc.exe
-        asset_content_type: application/octet-stream
+        asset_path: ${{ env.ZIP_FILE }}
+        asset_name: CasioEmuMsvc-Full.zip
+        asset_content_type: application/zip
 
-    - name: Zip Release Files
-      run: |
-        $releaseFolder = "${{ env.BUILD_OUTPUT }}" | Split-Path
-        Compress-Archive -Path "$releaseFolder\*" -DestinationPath "$releaseFolder\CasioEmuMsvc-Full.zip"
-        echo "ZIP_FILE=$releaseFolder\CasioEmuMsvc-Full.zip" >> $env:GITHUB_ENV
-      shell: pwsh
-
-    - name: Upload Additional Files
-      uses: actions/upload-release-asset@v1
+    - name: Upload Individual Build Outputs
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ${{ env.ZIP_FILE }}
-        asset_name: CasioEmuMsvc-Hieuxyz.zip
-        asset_content_type: application/zip
+      run: |
+        Get-ChildItem -Path "$env:GITHUB_WORKSPACE\BuildOutputs" -Recurse -File | ForEach-Object {
+          $relativePath = $_.FullName.Replace("$env:GITHUB_WORKSPACE\BuildOutputs\", "")
+          $assetName = $relativePath.Replace("\", "-")
+          gh release upload casioemumsvc-release-${{ github.run_number }} $_.FullName --clobber
+        }
+      shell: pwsh
