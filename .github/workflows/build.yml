@@ -52,7 +52,7 @@ jobs:
     - name: Build solution
       run: |
         if (-not $env:SOLUTION_FILE) {
-      Write-Error "No .sln file found in the CasioEmuMsvc repository"
+          Write-Error "No .sln file found in the CasioEmuMsvc repository"
           exit 1
         }
         msbuild $env:SOLUTION_FILE /t:restore,rebuild /p:Configuration=Release /p:Platform="x64" /m
