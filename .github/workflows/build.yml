@@ -1,0 +1,60 @@
+name: Build CasioEmuMsvc
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    
+    - name: Add msbuild to PATH
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: Setup Visual Studio Developer Command Prompt
+      uses: ilammy/msvc-dev-cmd@v1
+      
+    - name: Install Visual Studio SDK
+      run: |
+        choco install visualstudio2022-workload-vctools -y
+        choco install visualstudio2022buildtools -y
+    
+    - name: Build solution
+      run: |
+        msbuild CasioEmuMsvc.sln /p:Configuration=Release /p:Platform="x64" /m
+    
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: release-${{ github.run_number }}
+        release_name: Release ${{ github.run_number }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./x64/Release/CasioEmuMsvc.exe
+        asset_name: CasioEmuMsvc.exe
+        asset_content_type: application/octet-stream
+
+    - name: Upload Additional Files
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./x64/Release/
+        asset_name: CasioEmuMsvc-Hieuxyz.zip
+        asset_content_type: application/zip
