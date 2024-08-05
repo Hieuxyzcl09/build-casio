@@ -180,35 +180,74 @@ jobs:
         process_apk() {
           local INPUT=$1
           local OUTPUT=$2
-          ${ANDROID_HOME}/build-tools/*/zipalign -v 4 "$INPUT" "$OUTPUT"
+          echo "Processing APK: $INPUT -> $OUTPUT"
+          
+          # Kiểm tra xem tệp đầu vào có tồn tại không
+          if [ ! -f "$INPUT" ]; then
+            echo "Error: Input file $INPUT does not exist"
+            return 1
+          fi
+          
+          # Đảm bảo thư mục đầu ra tồn tại
+          mkdir -p "$(dirname "$OUTPUT")"
+          
+          # Sử dụng đường dẫn đầy đủ cho zipalign
+          ZIPALIGN="${ANDROID_HOME}/build-tools/*/zipalign"
+          
+          # Chạy zipalign với xử lý lỗi
+          if ! $ZIPALIGN -v 4 "$INPUT" "$OUTPUT"; then
+            echo "Error: zipalign failed for $INPUT"
+            return 1
+          fi
           
           if [ ! -f ~/.android/debug.keystore ]; then
             mkdir -p ~/.android
             keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
           
-          ${ANDROID_HOME}/build-tools/*/apksigner sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android "$OUTPUT"
+          # Sử dụng đường dẫn đầy đủ cho apksigner
+          APKSIGNER="${ANDROID_HOME}/build-tools/*/apksigner"
+          
+          # Chạy apksigner với xử lý lỗi
+          if ! $APKSIGNER sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android "$OUTPUT"; then
+            echo "Error: apksigner failed for $OUTPUT"
+            return 1
+          fi
+          
+          echo "Successfully processed $OUTPUT"
         }
         
         APK_FILES=$(find . -name "*-release-unsigned.apk")
         if [ -z "$APK_FILES" ]; then
-          echo "Warning: No APK files found"
-        else
-          for APK in $APK_FILES; do
-            BASENAME=$(basename "$APK")
-            if [[ $BASENAME == *"x86"* ]]; then
-              process_apk "$APK" "apks/CasioEmuAndroid-x86-${{ github.event.inputs.target_language }}.apk"
-            elif [[ $BASENAME == *"armeabi-v7a"* ]]; then
-              process_apk "$APK" "apks/CasioEmuAndroid-arm32-${{ github.event.inputs.target_language }}.apk"
-            elif [[ $BASENAME == *"arm64-v8a"* ]]; then
-              process_apk "$APK" "apks/CasioEmuAndroid-arm64-${{ github.event.inputs.target_language }}.apk"
-            elif [[ $BASENAME == *"x86_64"* ]]; then
-              process_apk "$APK" "apks/CasioEmuAndroid-x64-${{ github.event.inputs.target_language }}.apk"
-            elif [[ $BASENAME == *"universal"* ]] || [[ $BASENAME == *"release"* ]]; then
-              process_apk "$APK" "apks/CasioEmuAndroid-universal-${{ github.event.inputs.target_language }}.apk"
-            fi
-          done
+          echo "Warning: No unsigned release APK files found"
+          APK_FILES=$(find . -name "*.apk")
+          if [ -z "$APK_FILES" ]; then
+            echo "Error: No APK files found at all"
+            exit 1
+          fi
         fi
+        for APK in $APK_FILES; do
+          BASENAME=$(basename "$APK")
+          if [[ $BASENAME == *"x86"* ]]; then
+            process_apk "$APK" "apks/CasioEmuAndroid-x86-${{ github.event.inputs.target_language }}.apk"
+          elif [[ $BASENAME == *"armeabi-v7a"* ]]; then
+            process_apk "$APK" "apks/CasioEmuAndroid-arm32-${{ github.event.inputs.target_language }}.apk"
+          elif [[ $BASENAME == *"arm64-v8a"* ]]; then
+            process_apk "$APK" "apks/CasioEmuAndroid-arm64-${{ github.event.inputs.target_language }}.apk"
+          elif [[ $BASENAME == *"x86_64"* ]]; then
+            process_apk "$APK" "apks/CasioEmuAndroid-x64-${{ github.event.inputs.target_language }}.apk"
+          elif [[ $BASENAME == *"universal"* ]] || [[ $BASENAME == *"release"* ]]; then
+            process_apk "$APK" "apks/CasioEmuAndroid-universal-${{ github.event.inputs.target_language }}.apk"
+          else
+            process_apk "$APK" "apks/CasioEmuAndroid-unknown-${{ github.event.inputs.target_language }}.apk"
+          fi
+          
+          # Kiểm tra xem process_apk có thành công không
+          if [ $? -ne 0 ]; then
+            echo "Error occurred while processing $APK"
+            exit 1
+          fi
+        done
 
     - name: Create Release
       env:
