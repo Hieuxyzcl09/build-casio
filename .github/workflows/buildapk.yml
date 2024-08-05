@@ -24,6 +24,84 @@ jobs:
     - name: Set up Android SDK
       uses: android-actions/setup-android@v2
 
+    - name: Find and Modify MainActivity
+      run: |
+        # Tìm tất cả các file có tên là MainActivity.java hoặc MainActivity.kt
+        MAIN_ACTIVITY_FILES=$(find . -type f \( -name "MainActivity.java" -o -name "MainActivity.kt" \))
+        
+        # Nếu không tìm thấy, tìm file chứa phương thức onCreate và kế thừa từ AppCompatActivity hoặc Activity
+        if [ -z "$MAIN_ACTIVITY_FILES" ]; then
+          MAIN_ACTIVITY_FILES=$(grep -R -l "extends.*Activity.*onCreate" . | grep "\.java$")
+          MAIN_ACTIVITY_FILES+=" "
+          MAIN_ACTIVITY_FILES+=$(grep -R -l "class.*:.*Activity.*onCreate" . | grep "\.kt$")
+        fi
+        
+        # Nếu vẫn không tìm thấy, báo lỗi và thoát
+        if [ -z "$MAIN_ACTIVITY_FILES" ]; then
+          echo "Error: Could not find MainActivity or any Activity with onCreate method"
+          exit 1
+        fi
+        
+        # Lặp qua tất cả các file tìm được
+        for FILE in $MAIN_ACTIVITY_FILES; do
+          echo "Modifying file: $FILE"
+          
+          # Kiểm tra xem file là Java hay Kotlin
+          if [[ $FILE == *.java ]]; then
+            # Thêm mã Java
+            sed -i '/super.onCreate(savedInstanceState);/a\
+            \        // Thêm thông báo "Build by Hieuxyz"\
+            \        android.widget.Toast toast = android.widget.Toast.makeText(this, "Build by Hieuxyz", android.widget.Toast.LENGTH_LONG);\
+            \        toast.show();\
+            \        // Đóng thông báo sau 5 giây\
+            \        new android.os.Handler().postDelayed(new Runnable() {\
+            \            @Override\
+            \            public void run() {\
+            \                toast.cancel();\
+            \            }\
+            \        }, 5000);' "$FILE"
+          elif [[ $FILE == *.kt ]]; then
+            # Thêm mã Kotlin
+            sed -i '/super.onCreate(savedInstanceState)/a\
+            \        // Thêm thông báo "Build by Hieuxyz"\
+            \        val toast = android.widget.Toast.makeText(this, "Build by Hieuxyz", android.widget.Toast.LENGTH_LONG)\
+            \        toast.show()\
+            \        // Đóng thông báo sau 5 giây\
+            \        android.os.Handler().postDelayed({ toast.cancel() }, 5000)' "$FILE"
+          fi
+          
+          echo "Modified $FILE"
+          cat "$FILE"
+        done
+
+    - name: Modify build.gradle files
+      run: |
+        # Tìm tất cả các file build.gradle
+        GRADLE_FILES=$(find . -name "build.gradle")
+        
+        for FILE in $GRADLE_FILES; do
+          echo "Modifying file: $FILE"
+          
+          # Thêm cấu hình để build nhiều kiến trúc
+          sed -i '/android {/a\
+            defaultConfig {\
+                ndk {\
+                    abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"\
+                }\
+            }\
+            splits {\
+                abi {\
+                    enable true\
+                    reset()\
+                    include "armeabi-v7a", "arm64-v8a", "x86", "x86_64"\
+                    universalApk true\
+                }\
+            }' "$FILE"
+          
+          echo "Modified $FILE"
+          cat "$FILE"
+        done
+
     - name: Cache Gradle packages
       uses: actions/cache@v3
       with:
@@ -35,36 +113,64 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x ./gradlew
 
-    - name: Build APK
+    - name: Find latest build tools version
       run: |
+        BUILD_TOOLS_VERSION=$(ls ${ANDROID_HOME}/build-tools | sort -V | tail -n 1)
+        echo "Using build tools version: $BUILD_TOOLS_VERSION"
+        echo "BUILD_TOOLS_VERSION=$BUILD_TOOLS_VERSION" >> $GITHUB_ENV
+
+    - name: Build APKs
+      run: |
+        # Build for different architectures
         ./gradlew assembleRelease
-        mkdir -p app/build/outputs/apk/release
-        ${ANDROID_HOME}/build-tools/30.0.3/zipalign -v 4 app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/app-release-unsigned-aligned.apk
-        ${ANDROID_HOME}/build-tools/30.0.3/apksigner sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android --out app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/app-release-unsigned-aligned.apk
+        
+        # Create directory for APKs
+        mkdir -p apks
+        
+        # Function to process APK
+        process_apk() {
+          local INPUT=$1
+          local OUTPUT=$2
+          ${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/zipalign -v 4 $INPUT $OUTPUT
+          
+          # Create debug keystore if it doesn't exist
+          if [ ! -f ~/.android/debug.keystore ]; then
+            mkdir -p ~/.android
+            keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          
+          ${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/apksigner sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android $OUTPUT
+        }
+        
+        # Find and process APKs for different architectures
+        for APK in app/build/outputs/apk/release/*-release-unsigned.apk; do
+          BASENAME=$(basename $APK)
+          if [[ $BASENAME == *"x86"* ]]; then
+            process_apk $APK apks/CasioEmuAndroid-x86.apk
+          elif [[ $BASENAME == *"armeabi-v7a"* ]]; then
+            process_apk $APK apks/CasioEmuAndroid-arm32.apk
+          elif [[ $BASENAME == *"arm64-v8a"* ]]; then
+            process_apk $APK apks/CasioEmuAndroid-arm64.apk
+          elif [[ $BASENAME == *"x86_64"* ]]; then
+            process_apk $APK apks/CasioEmuAndroid-x64.apk
+          elif [[ $BASENAME == *"universal"* ]]; then
+            process_apk $APK apks/CasioEmuAndroid-universal.apk
+          fi
+        done
 
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: v${{ github.run_number }}
-        release_name: Release ${{ github.run_number }}
-        draft: false
-        prerelease: false
-
-    - name: Upload APK to Release
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./app/build/outputs/apk/release/app-release.apk
-        asset_name: CasioEmuAndroid-v${{ github.run_number }}.apk
-        asset_content_type: application/vnd.android.package-archive
-
-    - name: Upload APK using gh
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        gh release upload v${{ github.run_number }} ./app/build/outputs/apk/release/app-release.apk#CasioEmuAndroid-v${{ github.run_number }}.apk
+        VERSION=$(grep versionName app/build.gradle | awk '{print $2}' | tr -d '"')
+        if [ -z "$VERSION" ]; then
+          VERSION=${{ github.run_number }}
+        fi
+        RELEASE_FILES=""
+        for APK in apks/*.apk; do
+          RELEASE_FILES="$RELEASE_FILES $APK"
+        done
+        gh release create v$VERSION \
+          --title "Release $VERSION" \
+          --notes "Release notes for version $VERSION" \
+          $RELEASE_FILES
