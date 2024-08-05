@@ -274,62 +274,86 @@ jobs:
     needs: test
     runs-on: windows-latest
     steps:
-    - name: Download all build outputs
-      uses: actions/download-artifact@v4
-      with:
-        path: BuildOutputs
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: casioemumsvc-release-${{ github.run_number }}
-        release_name: CasioEmuMsvc Release ${{ github.run_number }}
-        draft: false
-        prerelease: false
+      - name: Download all build outputs
+        uses: actions/download-artifact@v4
+        with:
+          path: BuildOutputs
 
-    - name: Prepare Release Files
-      run: |
-        $releaseFolder = "$env:GITHUB_WORKSPACE\ReleaseFiles"
-        New-Item -ItemType Directory -Force -Path $releaseFolder
+      - name: Prepare Release Files
+        run: |
+          $releaseFolder = "$env:GITHUB_WORKSPACE\ReleaseFiles"
+          New-Item -ItemType Directory -Force -Path $releaseFolder
 
-        # Copy all build outputs to release folder
-        Copy-Item -Path "$env:GITHUB_WORKSPACE\BuildOutputs\*" -Destination $releaseFolder -Recurse
+          # Copy all build outputs to release folder
+          Copy-Item -Path "$env:GITHUB_WORKSPACE\BuildOutputs\*" -Destination $releaseFolder -Recurse
 
-        # Create separate zip files for each configuration and platform
-        Get-ChildItem -Path $releaseFolder -Directory | ForEach-Object {
-          $configName = $_.Name
-          Get-ChildItem -Path $_.FullName -Directory | ForEach-Object {
-            $platformName = $_.Name
-            $zipName = "CasioEmuMsvc-$configName-$platformName.zip"
-            Compress-Archive -Path $_.FullName -DestinationPath "$releaseFolder\$zipName"
+          # Create separate zip files for each configuration and platform
+          Get-ChildItem -Path $releaseFolder -Directory | ForEach-Object {
+            $configName = $_.Name
+            Get-ChildItem -Path $_.FullName -Directory | ForEach-Object {
+              $platformName = $_.Name
+              $zipName = "CasioEmuMsvc-$configName-$platformName.zip"
+              Compress-Archive -Path $_.FullName -DestinationPath "$releaseFolder\$zipName"
+            }
           }
-        }
 
-        # Create a full zip containing all builds
-        Compress-Archive -Path "$releaseFolder\*" -DestinationPath "$releaseFolder\CasioEmuMsvc-Full.zip"
+          # Create a full zip containing all builds
+          Compress-Archive -Path "$releaseFolder\*" -DestinationPath "$releaseFolder\CasioEmuMsvc-Full.zip"
 
-        echo "RELEASE_FOLDER=$releaseFolder" >> $env:GITHUB_ENV
-      shell: pwsh
+          echo "RELEASE_FOLDER=$releaseFolder" >> $env:GITHUB_ENV
+        shell: pwsh
 
-    - name: Upload Release Assets
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        Get-ChildItem -Path $env:RELEASE_FOLDER -Filter *.zip | ForEach-Object {
-          gh release upload casioemumsvc-release-${{ github.run_number }} $_.FullName --clobber
-        }
-      shell: pwsh
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: casioemumsvc-release-${{ github.run_number }}
+          release_name: CasioEmuMsvc Release ${{ github.run_number }}
+          draft: false
+          prerelease: false
 
-    - name: Upload Additional Files
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        Get-ChildItem -Path "$env:RELEASE_FOLDER" -Recurse -File | Where-Object { $_.Extension -notin '.zip' } | ForEach-Object {
-          $relativePath = $_.FullName.Replace("$env:RELEASE_FOLDER\", "")
-          $assetName = $relativePath.Replace("\", "-")
-          gh release upload casioemumsvc-release-${{ github.run_number }} $_.FullName --name $assetName --clobber
-        }
-      shell: pwsh
+      - name: Upload Release Assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $releaseId = '${{ steps.create_release.outputs.id }}'
+          $assetUrl = "https://uploads.github.com/repos/${{ github.repository }}/releases/$releaseId/assets"
+          
+          Get-ChildItem -Path $env:RELEASE_FOLDER -Filter *.zip | ForEach-Object {
+            $fileName = $_.Name
+            $filePath = $_.FullName
+            $contentType = "application/zip"
+            
+            Invoke-RestMethod -Uri "${assetUrl}?name=${fileName}" -Method Post -Headers @{
+              "Authorization" = "token ${{ secrets.GITHUB_TOKEN }}"
+              "Content-Type" = $contentType
+            } -InFile $filePath
+          }
+        shell: pwsh
+
+      - name: Upload Additional Files
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $releaseId = '${{ steps.create_release.outputs.id }}'
+          $assetUrl = "https://uploads.github.com/repos/${{ github.repository }}/releases/$releaseId/assets"
+          
+          Get-ChildItem -Path "$env:RELEASE_FOLDER" -Recurse -File | Where-Object { $_.Extension -notin '.zip' } | ForEach-Object {
+            $relativePath = $_.FullName.Replace("$env:RELEASE_FOLDER\", "")
+            $assetName = $relativePath.Replace("\", "-")
+            $filePath = $_.FullName
+            $contentType = "application/octet-stream"
+            
+            Invoke-RestMethod -Uri "${assetUrl}?name=${assetName}" -Method Post -Headers @{
+              "Authorization" = "token ${{ secrets.GITHUB_TOKEN }}"
+              "Content-Type" = $contentType
+            } -InFile $filePath
+          }
+        shell: pwsh
