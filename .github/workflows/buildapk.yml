@@ -76,12 +76,26 @@ jobs:
           echo "Warning: Could not find MainActivity or main Activity file"
         else
           echo "Modifying main file: $MAIN_FILE"
-          VERIFICATION_CODE='val fullEncoded = VERIFY_PART1 + VERIFY_PART2 + VERIFY_PART3
-val decoded = String(android.util.Base64.decode(String(android.util.Base64.decode(String(android.util.Base64.decode(fullEncoded, android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT))
-if (decoded != "Build by hieuxyz") {
-    throw RuntimeException("Invalid build signature")
-}
-android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show()'
+          VERIFICATION_CODE='
+            val fullEncoded = VERIFY_PART1 + VERIFY_PART2 + VERIFY_PART3
+            val decoded = String(
+              android.util.Base64.decode(
+                String(
+                  android.util.Base64.decode(
+                    String(
+                      android.util.Base64.decode(fullEncoded, android.util.Base64.DEFAULT)
+                    ),
+                    android.util.Base64.DEFAULT
+                  )
+                ),
+                android.util.Base64.DEFAULT
+              )
+            )
+            if (decoded != "Build by hieuxyz") {
+                throw RuntimeException("Invalid build signature")
+            }
+            android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show()
+          '
           sed -i "/super.onCreate/a $VERIFICATION_CODE" "$MAIN_FILE"
         fi
 
