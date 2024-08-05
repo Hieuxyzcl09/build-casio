@@ -89,7 +89,6 @@ android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).s
       run: |
         TARGET_LANG="${{ github.event.inputs.target_language }}"
         
-        # Function to translate a single file
         translate_file() {
           local FILE=$1
           local BASENAME=$(basename "$FILE")
@@ -118,10 +117,8 @@ android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).s
           echo "Translated $FILE to $NEW_FILE"
         }
         
-        # Find all string resource files
         STRING_FILES=$(find . -name "strings.xml")
         
-        # Translate each file
         for FILE in $STRING_FILES; do
           translate_file "$FILE"
         done
