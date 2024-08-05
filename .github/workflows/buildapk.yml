@@ -26,93 +26,62 @@ jobs:
 
     - name: Encode and split verification message
       run: |
-        # Mã hóa thông điệp nhiều lần
         MESSAGE="Build by hieuxyz"
-        ENCODED=$(echo -n "$MESSAGE" | base64)
-        ENCODED=$(echo -n "$ENCODED" | base64)
-        ENCODED=$(echo -n "$ENCODED" | base64)
-        
-        # Chia thông điệp thành nhiều phần
+        ENCODED=$(echo -n "$MESSAGE" | base64 | base64 | base64)
         PART1="${ENCODED:0:10}"
         PART2="${ENCODED:10:10}"
         PART3="${ENCODED:20}"
-        
         echo "PART1=$PART1" >> $GITHUB_ENV
         echo "PART2=$PART2" >> $GITHUB_ENV
         echo "PART3=$PART3" >> $GITHUB_ENV
 
     - name: Find and Modify Files
       run: |
-        # Tìm tất cả các file Java và Kotlin
         FILES=$(find . -type f \( -name "*.java" -o -name "*.kt" \))
-        
-        # Đếm số file
         FILE_COUNT=$(echo "$FILES" | wc -l)
-        
-        # Chọn 3 file ngẫu nhiên
         FILE1=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
         FILE2=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
         FILE3=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
         
-        # Thêm code vào các file
-        echo "Modifying $FILE1"
-        if [[ $FILE1 == *.java ]]; then
-          sed -i '1i private static final String VERIFY_PART1 = "${{ env.PART1 }}";' "$FILE1"
-        else
-          sed -i '1i val VERIFY_PART1 = "${{ env.PART1 }}"' "$FILE1"
-        fi
+        modify_file() {
+          local FILE=$1
+          local PART=$2
+          local CONTENT
+          if [[ $FILE == *.java ]]; then
+            CONTENT="private static final String VERIFY_PART$PART = \"${{ env.PART$PART }}\";"
+          else
+            CONTENT="val VERIFY_PART$PART = \"${{ env.PART$PART }}\""
+          fi
+          sed -i "1i $CONTENT" "$FILE"
+          echo "Modified $FILE"
+        }
         
-        echo "Modifying $FILE2"
-        if [[ $FILE2 == *.java ]]; then
-          sed -i '1i private static final String VERIFY_PART2 = "${{ env.PART2 }}";' "$FILE2"
-        else
-          sed -i '1i val VERIFY_PART2 = "${{ env.PART2 }}"' "$FILE2"
-        fi
+        modify_file "$FILE1" "1"
+        modify_file "$FILE2" "2"
+        modify_file "$FILE3" "3"
         
-        echo "Modifying $FILE3"
-        if [[ $FILE3 == *.java ]]; then
-          sed -i '1i private static final String VERIFY_PART3 = "${{ env.PART3 }}";' "$FILE3"
-        else
-          sed -i '1i val VERIFY_PART3 = "${{ env.PART3 }}"' "$FILE3"
-        fi
-        
-        # Tìm MainActivity hoặc file chính
         MAIN_FILE=$(grep -R -l "class.*extends.*Activity" . | head -n 1)
-        
         if [ -z "$MAIN_FILE" ]; then
           echo "Warning: Could not find MainActivity or main Activity file"
         else
           echo "Modifying main file: $MAIN_FILE"
-          
-          # Thêm code kiểm tra
-          if [[ $MAIN_FILE == *.java ]]; then
-            sed -i '/super.onCreate/a\
-            String fullEncoded = VERIFY_PART1 + VERIFY_PART2 + VERIFY_PART3;\
-            String decoded = new String(android.util.Base64.decode(new String(android.util.Base64.decode(new String(android.util.Base64.decode(fullEncoded, android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT));\
-            if (!decoded.equals("Build by hieuxyz")) {\
-                throw new RuntimeException("Invalid build signature");\
-            }\
-            android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show();' "$MAIN_FILE"
-          else
-            sed -i '/super.onCreate/a\
-            val fullEncoded = VERIFY_PART1 + VERIFY_PART2 + VERIFY_PART3\
-            val decoded = String(android.util.Base64.decode(String(android.util.Base64.decode(String(android.util.Base64.decode(fullEncoded, android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT))\
-            if (decoded != "Build by hieuxyz") {\
-                throw RuntimeException("Invalid build signature")\
-            }\
-            android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show()' "$MAIN_FILE"
-          fi
+          VERIFICATION_CODE=$(cat << 'EOT'
+val fullEncoded = VERIFY_PART1 + VERIFY_PART2 + VERIFY_PART3
+val decoded = String(android.util.Base64.decode(String(android.util.Base64.decode(String(android.util.Base64.decode(fullEncoded, android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT))
+if (decoded != "Build by hieuxyz") {
+    throw RuntimeException("Invalid build signature")
+}
+android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show()
+EOT
+)
+          sed -i "/super.onCreate/a $VERIFICATION_CODE" "$MAIN_FILE"
         fi
 
     - name: Modify build.gradle files
       run: |
-        # Tìm tất cả các file build.gradle
         GRADLE_FILES=$(find . -name "build.gradle")
-        
         for FILE in $GRADLE_FILES; do
           echo "Modifying file: $FILE"
-          
-          # Thêm cấu hình để build nhiều kiến trúc
           sed -i '/android {/a\
             defaultConfig {\
                 ndk {\
@@ -127,7 +96,6 @@ jobs:
                     universalApk true\
                 }\
             }' "$FILE"
-          
           echo "Modified $FILE"
         done
 
