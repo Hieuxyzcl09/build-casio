@@ -3,9 +3,6 @@ name: Build and Release APK
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,62 +24,84 @@ jobs:
     - name: Accept Android SDK licenses
       run: yes | sdkmanager --licenses
 
-    - name: Find and Modify MainActivity
+    - name: Encode and split verification message
       run: |
-        # Tìm tất cả các file có tên là MainActivity.java hoặc MainActivity.kt
-        MAIN_ACTIVITY_FILES=$(find . -type f \( -name "MainActivity.java" -o -name "MainActivity.kt" \))
+        # Mã hóa thông điệp nhiều lần
+        MESSAGE="Build by hieuxyz"
+        ENCODED=$(echo -n "$MESSAGE" | base64)
+        ENCODED=$(echo -n "$ENCODED" | base64)
+        ENCODED=$(echo -n "$ENCODED" | base64)
         
-        # Nếu không tìm thấy, tìm file chứa phương thức onCreate và kế thừa từ AppCompatActivity hoặc Activity
-        if [ -z "$MAIN_ACTIVITY_FILES" ]; then
-          MAIN_ACTIVITY_FILES=$(grep -R -l "extends.*Activity.*onCreate" . | grep "\.java$")
-          MAIN_ACTIVITY_FILES+=" "
-          MAIN_ACTIVITY_FILES+=$(grep -R -l "class.*:.*Activity.*onCreate" . | grep "\.kt$")
+        # Chia thông điệp thành nhiều phần
+        PART1="${ENCODED:0:10}"
+        PART2="${ENCODED:10:10}"
+        PART3="${ENCODED:20}"
+        
+        echo "PART1=$PART1" >> $GITHUB_ENV
+        echo "PART2=$PART2" >> $GITHUB_ENV
+        echo "PART3=$PART3" >> $GITHUB_ENV
+
+    - name: Find and Modify Files
+      run: |
+        # Tìm tất cả các file Java và Kotlin
+        FILES=$(find . -type f \( -name "*.java" -o -name "*.kt" \))
+        
+        # Đếm số file
+        FILE_COUNT=$(echo "$FILES" | wc -l)
+        
+        # Chọn 3 file ngẫu nhiên
+        FILE1=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
+        FILE2=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
+        FILE3=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
+        
+        # Thêm code vào các file
+        echo "Modifying $FILE1"
+        if [[ $FILE1 == *.java ]]; then
+          sed -i '1i private static final String VERIFY_PART1 = "${{ env.PART1 }}";' "$FILE1"
+        else
+          sed -i '1i val VERIFY_PART1 = "${{ env.PART1 }}"' "$FILE1"
         fi
         
-        # Nếu vẫn không tìm thấy, báo lỗi và thoát
-        if [ -z "$MAIN_ACTIVITY_FILES" ]; then
-          echo "Warning: Could not find MainActivity or any Activity with onCreate method"
+        echo "Modifying $FILE2"
+        if [[ $FILE2 == *.java ]]; then
+          sed -i '1i private static final String VERIFY_PART2 = "${{ env.PART2 }}";' "$FILE2"
         else
-          # Mã hóa thông báo "Build by Hieuxyz"
-          ENCODED_MESSAGE=$(echo -n "Build by Hieuxyz" | base64)
+          sed -i '1i val VERIFY_PART2 = "${{ env.PART2 }}"' "$FILE2"
+        fi
+        
+        echo "Modifying $FILE3"
+        if [[ $FILE3 == *.java ]]; then
+          sed -i '1i private static final String VERIFY_PART3 = "${{ env.PART3 }}";' "$FILE3"
+        else
+          sed -i '1i val VERIFY_PART3 = "${{ env.PART3 }}"' "$FILE3"
+        fi
+        
+        # Tìm MainActivity hoặc file chính
+        MAIN_FILE=$(grep -R -l "class.*extends.*Activity" . | head -n 1)
+        
+        if [ -z "$MAIN_FILE" ]; then
+          echo "Warning: Could not find MainActivity or main Activity file"
+        else
+          echo "Modifying main file: $MAIN_FILE"
           
-          # Lặp qua tất cả các file tìm được
-          for FILE in $MAIN_ACTIVITY_FILES; do
-            echo "Modifying file: $FILE"
-            
-            # Kiểm tra xem file là Java hay Kotlin
-            if [[ $FILE == *.java ]]; then
-              # Thêm mã Java
-              sed -i '/super.onCreate(savedInstanceState);/a\
-              \        String encodedMessage = "'"$ENCODED_MESSAGE"'";\
-              \        String decodedMessage = new String(android.util.Base64.decode(encodedMessage, android.util.Base64.DEFAULT));\
-              \        if (!decodedMessage.equals("Build by Hieuxyz")) {\
-              \            throw new RuntimeException("Invalid build signature");\
-              \        }\
-              \        android.widget.Toast toast = android.widget.Toast.makeText(this, decodedMessage, android.widget.Toast.LENGTH_LONG);\
-              \        toast.show();\
-              \        new android.os.Handler().postDelayed(new Runnable() {\
-              \            @Override\
-              \            public void run() {\
-              \                toast.cancel();\
-              \            }\
-              \        }, 5000);' "$FILE"
-            elif [[ $FILE == *.kt ]]; then
-              # Thêm mã Kotlin
-              sed -i '/super.onCreate(savedInstanceState)/a\
-              \        val encodedMessage = "'"$ENCODED_MESSAGE"'"\
-              \        val decodedMessage = String(android.util.Base64.decode(encodedMessage, android.util.Base64.DEFAULT))\
-              \        if (decodedMessage != "Build by Hieuxyz") {\
-              \            throw RuntimeException("Invalid build signature")\
-              \        }\
-              \        val toast = android.widget.Toast.makeText(this, decodedMessage, android.widget.Toast.LENGTH_LONG)\
-              \        toast.show()\
-              \        android.os.Handler().postDelayed({ toast.cancel() }, 5000)' "$FILE"
-            fi
-            
-            echo "Modified $FILE"
-            cat "$FILE"
-          done
+          # Thêm code kiểm tra
+          if [[ $MAIN_FILE == *.java ]]; then
+            sed -i '/super.onCreate/a\
+            String fullEncoded = VERIFY_PART1 + VERIFY_PART2 + VERIFY_PART3;\
+            String decoded = new String(android.util.Base64.decode(new String(android.util.Base64.decode(new String(android.util.Base64.decode(fullEncoded, android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT));\
+            if (!decoded.equals("Build by hieuxyz")) {\
+                throw new RuntimeException("Invalid build signature");\
+            }\
+            android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show();' "$MAIN_FILE"
+          else
+            sed -i '/super.onCreate/a\
+            val fullEncoded = VERIFY_PART1 + VERIFY_PART2 + VERIFY_PART3\
+            val decoded = String(android.util.Base64.decode(String(android.util.Base64.decode(String(android.util.Base64.decode(fullEncoded, android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT)), android.util.Base64.DEFAULT))\
+            if (decoded != "Build by hieuxyz") {\
+                throw RuntimeException("Invalid build signature")\
+            }\
+            android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show()' "$MAIN_FILE"
+          fi
         fi
 
     - name: Modify build.gradle files
@@ -110,7 +129,6 @@ jobs:
             }' "$FILE"
           
           echo "Modified $FILE"
-          cat "$FILE"
         done
 
     - name: Cache Gradle packages
@@ -124,37 +142,26 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x ./gradlew
 
-    - name: Find latest build tools version
-      run: |
-        BUILD_TOOLS_VERSION=$(ls ${ANDROID_HOME}/build-tools | sort -V | tail -n 1)
-        echo "Using build tools version: $BUILD_TOOLS_VERSION"
-        echo "BUILD_TOOLS_VERSION=$BUILD_TOOLS_VERSION" >> $GITHUB_ENV
-
     - name: Build APKs
       run: |
-        # Ignore warnings about XML parsing
         export ANDROID_SDK_ROOT=$ANDROID_HOME
         ./gradlew assembleRelease --warning-mode all
         
-        # Create directory for APKs
         mkdir -p apks
         
-        # Function to process APK
         process_apk() {
           local INPUT=$1
           local OUTPUT=$2
-          ${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/zipalign -v 4 $INPUT $OUTPUT
+          ${ANDROID_HOME}/build-tools/*/zipalign -v 4 $INPUT $OUTPUT
           
-          # Create debug keystore if it doesn't exist
           if [ ! -f ~/.android/debug.keystore ]; then
             mkdir -p ~/.android
             keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
           
-          ${ANDROID_HOME}/build-tools/${BUILD_TOOLS_VERSION}/apksigner sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android $OUTPUT
+          ${ANDROID_HOME}/build-tools/*/apksigner sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android $OUTPUT
         }
         
-        # Find and process APKs for different architectures
         APK_FILES=$(find . -name "*-release-unsigned.apk")
         if [ -z "$APK_FILES" ]; then
           echo "Warning: No APK files found"
@@ -179,18 +186,8 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        VERSION=$(find . -name "build.gradle" | xargs grep versionName | awk '{print $2}' | tr -d '"' | head -n 1)
-        if [ -z "$VERSION" ]; then
-          VERSION=${{ github.run_number }}
-        fi
-        RELEASE_FILES=""
-        APK_FILES=$(find apks -name "*.apk")
-        if [ -z "$APK_FILES" ]; then
-          echo "Warning: No APK files found in apks directory"
-          RELEASE_FILES=$(find . -name "*-release-unsigned.apk")
-        else
-          RELEASE_FILES="$APK_FILES"
-        fi
+        VERSION=${{ github.run_number }}
+        RELEASE_FILES=$(find apks -name "*.apk")
         if [ -z "$RELEASE_FILES" ]; then
           echo "Error: No APK files found to release"
           exit 1
