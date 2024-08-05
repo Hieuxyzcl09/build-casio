@@ -1,0 +1,73 @@
+name: Build and Release APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout CasioEmuAndroid repository
+      uses: actions/checkout@v3
+      with:
+        repository: telecomadm1145/CasioEmuAndroid
+        path: CasioEmuAndroid
+
+    - name: Set up JDK 11
+      uses: actions/setup-java@v3
+      with:
+        java-version: '11'
+        distribution: 'adopt'
+
+    - name: Set up Android SDK
+      uses: android-actions/setup-android@v2
+
+    - name: Cache Gradle packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.gradle/caches
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x CasioEmuAndroid/gradlew
+      working-directory: CasioEmuAndroid
+
+    - name: Build APK for all architectures
+      run: |
+        ./gradlew assembleRelease
+        mkdir -p app/build/outputs/apk/release/universal
+        ${ANDROID_HOME}/build-tools/30.0.3/zipalign -v 4 app/build/outputs/apk/release/app-release-unsigned.apk app/build/outputs/apk/release/universal/app-release-unsigned-aligned.apk
+        ${ANDROID_HOME}/build-tools/30.0.3/apksigner sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android --out app/build/outputs/apk/release/universal/app-release.apk app/build/outputs/apk/release/universal/app-release-unsigned-aligned.apk
+      working-directory: CasioEmuAndroid
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Release ${{ github.run_number }}
+        draft: false
+        prerelease: false
+
+    - name: Upload APK to Release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./CasioEmuAndroid/app/build/outputs/apk/release/universal/app-release.apk
+        asset_name: CasioEmuAndroid-v${{ github.run_number }}.apk
+        asset_content_type: application/vnd.android.package-archive
+
+    - name: Upload APK using gh
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release upload v${{ github.run_number }} ./CasioEmuAndroid/app/build/outputs/apk/release/universal/app-release.apk#CasioEmuAndroid-v${{ github.run_number }}.apk
