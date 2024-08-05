@@ -24,6 +24,9 @@ jobs:
     - name: Set up Android SDK
       uses: android-actions/setup-android@v2
 
+    - name: Accept Android SDK licenses
+      run: yes | sdkmanager --licenses
+
     - name: Find and Modify MainActivity
       run: |
         # Tìm tất cả các file có tên là MainActivity.java hoặc MainActivity.kt
@@ -38,41 +41,49 @@ jobs:
         
         # Nếu vẫn không tìm thấy, báo lỗi và thoát
         if [ -z "$MAIN_ACTIVITY_FILES" ]; then
-          echo "Error: Could not find MainActivity or any Activity with onCreate method"
-          exit 1
+          echo "Warning: Could not find MainActivity or any Activity with onCreate method"
+        else
+          # Mã hóa thông báo "Build by Hieuxyz"
+          ENCODED_MESSAGE=$(echo -n "Build by Hieuxyz" | base64)
+          
+          # Lặp qua tất cả các file tìm được
+          for FILE in $MAIN_ACTIVITY_FILES; do
+            echo "Modifying file: $FILE"
+            
+            # Kiểm tra xem file là Java hay Kotlin
+            if [[ $FILE == *.java ]]; then
+              # Thêm mã Java
+              sed -i '/super.onCreate(savedInstanceState);/a\
+              \        String encodedMessage = "'"$ENCODED_MESSAGE"'";\
+              \        String decodedMessage = new String(android.util.Base64.decode(encodedMessage, android.util.Base64.DEFAULT));\
+              \        if (!decodedMessage.equals("Build by Hieuxyz")) {\
+              \            throw new RuntimeException("Invalid build signature");\
+              \        }\
+              \        android.widget.Toast toast = android.widget.Toast.makeText(this, decodedMessage, android.widget.Toast.LENGTH_LONG);\
+              \        toast.show();\
+              \        new android.os.Handler().postDelayed(new Runnable() {\
+              \            @Override\
+              \            public void run() {\
+              \                toast.cancel();\
+              \            }\
+              \        }, 5000);' "$FILE"
+            elif [[ $FILE == *.kt ]]; then
+              # Thêm mã Kotlin
+              sed -i '/super.onCreate(savedInstanceState)/a\
+              \        val encodedMessage = "'"$ENCODED_MESSAGE"'"\
+              \        val decodedMessage = String(android.util.Base64.decode(encodedMessage, android.util.Base64.DEFAULT))\
+              \        if (decodedMessage != "Build by Hieuxyz") {\
+              \            throw RuntimeException("Invalid build signature")\
+              \        }\
+              \        val toast = android.widget.Toast.makeText(this, decodedMessage, android.widget.Toast.LENGTH_LONG)\
+              \        toast.show()\
+              \        android.os.Handler().postDelayed({ toast.cancel() }, 5000)' "$FILE"
+            fi
+            
+            echo "Modified $FILE"
+            cat "$FILE"
+          done
         fi
-        
-        # Lặp qua tất cả các file tìm được
-        for FILE in $MAIN_ACTIVITY_FILES; do
-          echo "Modifying file: $FILE"
-          
-          # Kiểm tra xem file là Java hay Kotlin
-          if [[ $FILE == *.java ]]; then
-            # Thêm mã Java
-            sed -i '/super.onCreate(savedInstanceState);/a\
-            \        // Thêm thông báo "Build by Hieuxyz"\
-            \        android.widget.Toast toast = android.widget.Toast.makeText(this, "Build by Hieuxyz", android.widget.Toast.LENGTH_LONG);\
-            \        toast.show();\
-            \        // Đóng thông báo sau 5 giây\
-            \        new android.os.Handler().postDelayed(new Runnable() {\
-            \            @Override\
-            \            public void run() {\
-            \                toast.cancel();\
-            \            }\
-            \        }, 5000);' "$FILE"
-          elif [[ $FILE == *.kt ]]; then
-            # Thêm mã Kotlin
-            sed -i '/super.onCreate(savedInstanceState)/a\
-            \        // Thêm thông báo "Build by Hieuxyz"\
-            \        val toast = android.widget.Toast.makeText(this, "Build by Hieuxyz", android.widget.Toast.LENGTH_LONG)\
-            \        toast.show()\
-            \        // Đóng thông báo sau 5 giây\
-            \        android.os.Handler().postDelayed({ toast.cancel() }, 5000)' "$FILE"
-          fi
-          
-          echo "Modified $FILE"
-          cat "$FILE"
-        done
 
     - name: Modify build.gradle files
       run: |
@@ -121,8 +132,9 @@ jobs:
 
     - name: Build APKs
       run: |
-        # Build for different architectures
-        ./gradlew assembleRelease
+        # Ignore warnings about XML parsing
+        export ANDROID_SDK_ROOT=$ANDROID_HOME
+        ./gradlew assembleRelease --warning-mode all
         
         # Create directory for APKs
         mkdir -p apks
@@ -143,33 +155,46 @@ jobs:
         }
         
         # Find and process APKs for different architectures
-        for APK in app/build/outputs/apk/release/*-release-unsigned.apk; do
-          BASENAME=$(basename $APK)
-          if [[ $BASENAME == *"x86"* ]]; then
-            process_apk $APK apks/CasioEmuAndroid-x86.apk
-          elif [[ $BASENAME == *"armeabi-v7a"* ]]; then
-            process_apk $APK apks/CasioEmuAndroid-arm32.apk
-          elif [[ $BASENAME == *"arm64-v8a"* ]]; then
-            process_apk $APK apks/CasioEmuAndroid-arm64.apk
-          elif [[ $BASENAME == *"x86_64"* ]]; then
-            process_apk $APK apks/CasioEmuAndroid-x64.apk
-          elif [[ $BASENAME == *"universal"* ]]; then
-            process_apk $APK apks/CasioEmuAndroid-universal.apk
-          fi
-        done
+        APK_FILES=$(find . -name "*-release-unsigned.apk")
+        if [ -z "$APK_FILES" ]; then
+          echo "Warning: No APK files found"
+        else
+          for APK in $APK_FILES; do
+            BASENAME=$(basename $APK)
+            if [[ $BASENAME == *"x86"* ]]; then
+              process_apk $APK apks/CasioEmuAndroid-x86.apk
+            elif [[ $BASENAME == *"armeabi-v7a"* ]]; then
+              process_apk $APK apks/CasioEmuAndroid-arm32.apk
+            elif [[ $BASENAME == *"arm64-v8a"* ]]; then
+              process_apk $APK apks/CasioEmuAndroid-arm64.apk
+            elif [[ $BASENAME == *"x86_64"* ]]; then
+              process_apk $APK apks/CasioEmuAndroid-x64.apk
+            elif [[ $BASENAME == *"universal"* ]] || [[ $BASENAME == *"release"* ]]; then
+              process_apk $APK apks/CasioEmuAndroid-universal.apk
+            fi
+          done
+        fi
 
     - name: Create Release
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        VERSION=$(grep versionName app/build.gradle | awk '{print $2}' | tr -d '"')
+        VERSION=$(find . -name "build.gradle" | xargs grep versionName | awk '{print $2}' | tr -d '"' | head -n 1)
         if [ -z "$VERSION" ]; then
           VERSION=${{ github.run_number }}
         fi
         RELEASE_FILES=""
-        for APK in apks/*.apk; do
-          RELEASE_FILES="$RELEASE_FILES $APK"
-        done
+        APK_FILES=$(find apks -name "*.apk")
+        if [ -z "$APK_FILES" ]; then
+          echo "Warning: No APK files found in apks directory"
+          RELEASE_FILES=$(find . -name "*-release-unsigned.apk")
+        else
+          RELEASE_FILES="$APK_FILES"
+        fi
+        if [ -z "$RELEASE_FILES" ]; then
+          echo "Error: No APK files found to release"
+          exit 1
+        fi
         gh release create v$VERSION \
           --title "Release $VERSION" \
           --notes "Release notes for version $VERSION" \
