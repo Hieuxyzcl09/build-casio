@@ -59,17 +59,17 @@ jobs:
           local PART=$2
           local CONTENT
           if [[ $FILE == *.java ]]; then
-            CONTENT="private static final String VERIFY_PART$PART = \"${{ env.PART$PART }}\";"
+            CONTENT="private static final String VERIFY_PART$PART = \"${!PART}\";"
           else
-            CONTENT="val VERIFY_PART$PART = \"${{ env.PART$PART }}\""
+            CONTENT="val VERIFY_PART$PART = \"${!PART}\""
           fi
           sed -i "1i $CONTENT" "$FILE"
           echo "Modified $FILE"
         }
         
-        modify_file "$FILE1" "1"
-        modify_file "$FILE2" "2"
-        modify_file "$FILE3" "3"
+        modify_file "$FILE1" "PART1"
+        modify_file "$FILE2" "PART2"
+        modify_file "$FILE3" "PART3"
         
         MAIN_FILE=$(grep -R -l "class.*extends.*Activity" . | head -n 1)
         if [ -z "$MAIN_FILE" ]; then
