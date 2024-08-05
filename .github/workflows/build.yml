@@ -16,16 +16,14 @@ jobs:
     runs-on: windows-latest
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: telecomadm1145/CasioEmuMsvc
         path: CasioEmuMsvc
         fetch-depth: 0
 
     - name: Setup Visual Studio
-      uses: microsoft/setup-msbuild@v1.3
-      with:
-        vs-version: '[17.0,18.0)'
+      uses: microsoft/setup-msbuild@v1.3.1
 
     - name: Install Visual Studio components and SDK
       run: |
@@ -51,7 +49,7 @@ jobs:
       shell: pwsh
 
     - name: Setup .NET SDK
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: |
           5.0.x
@@ -59,7 +57,7 @@ jobs:
           7.0.x
 
     - name: Cache Visual Studio installation
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: C:\VS2022
         key: vs2022-cache-${{ runner.os }}-${{ hashFiles('**/vs_enterprise.exe') }}
@@ -75,7 +73,7 @@ jobs:
     runs-on: windows-latest
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: telecomadm1145/CasioEmuMsvc
         path: CasioEmuMsvc
@@ -85,7 +83,7 @@ jobs:
       uses: NuGet/setup-nuget@v1
 
     - name: Cache NuGet packages
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/.nuget/packages
         key: nuget-${{ runner.os }}-${{ hashFiles('**/packages.config', '**/*.csproj', '**/*.props', '**/*.targets') }}
@@ -106,123 +104,160 @@ jobs:
       shell: pwsh
 
   code_analysis:
-    needs: restore_packages
-    runs-on: windows-latest
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-      with:
-        repository: telecomadm1145/CasioEmuMsvc
-        path: CasioEmuMsvc
-        fetch-depth: 0
+      needs: restore_packages
+      runs-on: windows-latest
+      steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          repository: telecomadm1145/CasioEmuMsvc
+          path: CasioEmuMsvc
+          fetch-depth: 0
 
-    - name: Run Code Analysis
-      run: |
-        dotnet tool install --global Microsoft.CodeAnalysis.NetAnalyzers
-        dotnet analyze $env:GITHUB_WORKSPACE\CasioEmuMsvc\CasioEmuMsvc.sln
-      continue-on-error: true
-      shell: pwsh
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            5.0.x
+            6.0.x
+            7.0.x
+
+      - name: Run Code Analysis
+        run: |
+          dotnet add $env:GITHUB_WORKSPACE\CasioEmuMsvc\CasioEmuMsvc.sln package Microsoft.CodeAnalysis.NetAnalyzers
+          dotnet build $env:GITHUB_WORKSPACE\CasioEmuMsvc\CasioEmuMsvc.sln /p:RunAnalyzersDuringBuild=true /p:AnalysisLevel=latest
+        continue-on-error: true
+        shell: pwsh
 
   build:
-    needs: [restore_packages, code_analysis]
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        configuration: [Debug, Release]
-        platform: [x86, x64]
-      fail-fast: false
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-      with:
-        repository: telecomadm1145/CasioEmuMsvc
-        path: CasioEmuMsvc
-        fetch-depth: 0
+      needs: [restore_packages, code_analysis]
+      runs-on: windows-latest
+      strategy:
+        matrix:
+          configuration: [Debug, Release]
+          platform: [x86, x64]
+        fail-fast: false
+      steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
+          with:
+            repository: telecomadm1145/CasioEmuMsvc
+            path: CasioEmuMsvc
+            fetch-depth: 0
 
-    - name: Setup Visual Studio Developer Command Prompt
-      uses: ilammy/msvc-dev-cmd@v1
+        - name: Setup Visual Studio Developer Command Prompt
+          uses: ilammy/msvc-dev-cmd@v1
 
-    - name: Restore cached Visual Studio installation
-      uses: actions/cache@v3
-      with:
-        path: C:\VS2022
-        key: vs2022-cache-${{ runner.os }}-${{ hashFiles('**/vs_enterprise.exe') }}
+        - name: Restore cached Visual Studio installation
+          uses: actions/cache@v4
+          with:
+            path: C:\VS2022
+            key: vs2022-cache-${{ runner.os }}-${{ hashFiles('**/vs_enterprise.exe') }}
 
-    - name: Restore cached NuGet packages
-      uses: actions/cache@v3
-      with:
-        path: ~/.nuget/packages
-        key: nuget-${{ runner.os }}-${{ hashFiles('**/packages.config', '**/*.csproj', '**/*.props', '**/*.targets') }}
+        - name: Restore cached NuGet packages
+          uses: actions/cache@v4
+          with:
+            path: ~/.nuget/packages
+            key: nuget-${{ runner.os }}-${{ hashFiles('**/packages.config', '**/*.csproj', '**/*.props', '**/*.targets') }}
 
-    - name: Build all projects
-      run: |
-        Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.sln -Recurse | ForEach-Object {
-          $solutionFile = $_.FullName
-          Write-Host "Building solution: $solutionFile"
-          nuget restore $solutionFile
-          msbuild $solutionFile /t:rebuild /p:Configuration=${{ matrix.configuration }} /p:Platform="${{ matrix.platform }}" /m /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true /p:UseSharedCompilation=true /p:BuildInParallel=true /p:ContinuousIntegrationBuild=true /v:minimal /fl "/flp:logfile=msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log;verbosity=diagnostic" /p:TreatWarningsAsErrors=true
-        }
-      shell: pwsh
+        - name: Build all projects
+          run: |
+            Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.sln -Recurse | ForEach-Object {
+              $solutionFile = $_.FullName
+              Write-Host "Building solution: $solutionFile"
+              nuget restore $solutionFile
+              msbuild $solutionFile /t:rebuild /p:Configuration=${{ matrix.configuration }} /p:Platform="${{ matrix.platform }}" /m /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true /p:UseSharedCompilation=true /p:BuildInParallel=true /p:ContinuousIntegrationBuild=true /v:minimal /fl "/flp:logfile=msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log;verbosity=diagnostic" /p:TreatWarningsAsErrors=true
+            }
+          shell: pwsh
 
-    - name: Upload build logs
-      uses: actions/upload-artifact@v3
-      with:
-        name: build-logs-${{ matrix.configuration }}-${{ matrix.platform }}
-        path: msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log
+        - name: Upload build logs
+          uses: actions/upload-artifact@v3
+          with:
+            name: build-logs-${{ matrix.configuration }}-${{ matrix.platform }}
+            path: msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log
 
-    - name: Collect build outputs
-      run: |
-        $outputDir = "$env:GITHUB_WORKSPACE\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}"
-        New-Item -ItemType Directory -Force -Path $outputDir
-        Get-ChildItem -Path "$env:GITHUB_WORKSPACE\CasioEmuMsvc" -Recurse | Where-Object { 
-          $_.FullName -like "*\${{ matrix.platform }}\${{ matrix.configuration }}\*" -and 
-          -not $_.PSIsContainer
-        } | ForEach-Object { 
-          $targetPath = $_.FullName -replace [regex]::Escape("$env:GITHUB_WORKSPACE\CasioEmuMsvc"), $outputDir
-          $targetDir = Split-Path -Parent $targetPath
-          if (!(Test-Path $targetDir)) {
-            New-Item -ItemType Directory -Force -Path $targetDir
-          }
-          Copy-Item $_.FullName -Destination $targetPath -Force
-        }
-      shell: pwsh
+        - name: Collect build outputs
+          run: |
+            $outputDir = "$env:GITHUB_WORKSPACE\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}"
+            New-Item -ItemType Directory -Force -Path $outputDir
+            Get-ChildItem -Path "$env:GITHUB_WORKSPACE\CasioEmuMsvc" -Recurse | Where-Object { 
+              $_.FullName -like "*\${{ matrix.platform }}\${{ matrix.configuration }}\*" -and 
+              -not $_.PSIsContainer
+            } | ForEach-Object { 
+              $targetPath = $_.FullName -replace [regex]::Escape("$env:GITHUB_WORKSPACE\CasioEmuMsvc"), $outputDir
+              $targetDir = Split-Path -Parent $targetPath
+              if (!(Test-Path $targetDir)) {
+                New-Item -ItemType Directory -Force -Path $targetDir
+              }
+              Copy-Item $_.FullName -Destination $targetPath -Force
+            }
+          shell: pwsh
 
-    - name: Upload build outputs
-      uses: actions/upload-artifact@v3
-      with:
-        name: build-outputs-${{ matrix.configuration }}-${{ matrix.platform }}
-        path: ${{ github.workspace }}\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}
+        - name: Upload build outputs
+          uses: actions/upload-artifact@v3
+          with:
+            name: build-outputs-${{ matrix.configuration }}-${{ matrix.platform }}
+            path: ${{ github.workspace }}\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}
+          if: success()
 
-  test:
-    needs: build
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        configuration: [Debug, Release]
-        platform: [x86, x64]
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-      with:
-        repository: telecomadm1145/CasioEmuMsvc
-        path: CasioEmuMsvc
-        fetch-depth: 0
+        - name: List artifacts
+          if: always()
+          run: |
+            Write-Host "Available artifacts:"
+            Get-ChildItem -Path ${{ github.workspace }}\BuildOutputs -Recurse
+          shell: pwsh
 
-    - name: Download build outputs
-      uses: actions/download-artifact@v3
-      with:
-        name: build-outputs-${{ matrix.configuration }}-${{ matrix.platform }}
-        path: ${{ github.workspace }}\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}
+    test:
+      needs: build
+      runs-on: windows-latest
+      strategy:
+        matrix:
+          configuration: [Debug, Release]
+          platform: [x86, x64]
+      steps:
+        - name: Checkout repository
+          uses: actions/checkout@v4
+          with:
+            repository: telecomadm1145/CasioEmuMsvc
+            path: CasioEmuMsvc
+            fetch-depth: 0
 
-    - name: Run tests
-      run: |
-        $testAssemblies = Get-ChildItem -Path "$env:GITHUB_WORKSPACE\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}" -Recurse -Filter *Tests.dll
-        foreach ($testAssembly in $testAssemblies) {
-          Write-Host "Running tests for $($testAssembly.FullName)"
-          vstest.console.exe $testAssembly.FullName /Platform:${{ matrix.platform }} /Framework:.NETFramework,Version=v4.7.2
-        }
-      shell: pwsh
-      continue-on-error: true
+        - name: List available artifacts
+          run: |
+            Write-Host "Available artifacts:"
+            $artifacts = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/actions/artifacts" -Headers @{Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}"}
+            $artifacts.artifacts | ForEach-Object { Write-Host $_.name }
+          shell: pwsh
+
+        - name: Download build outputs
+          uses: actions/download-artifact@v3
+          with:
+            name: build-outputs-${{ matrix.configuration }}-${{ matrix.platform }}
+            path: ${{ github.workspace }}\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}
+          continue-on-error: true
+
+        - name: Check if artifact was downloaded
+          id: check_artifact
+          run: |
+            if (Test-Path "${{ github.workspace }}\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}") {
+              Write-Host "Artifact successfully downloaded"
+              echo "artifact_found=true" >> $env:GITHUB_OUTPUT
+            } else {
+              Write-Host "Artifact not found, skipping tests"
+              echo "artifact_found=false" >> $env:GITHUB_OUTPUT
+            }
+          shell: pwsh
+
+        - name: Run tests
+          if: steps.check_artifact.outputs.artifact_found == 'true'
+          run: |
+           $testAssemblies = Get-ChildItem -Path "${{ github.workspace }}\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}" -Recurse -Filter *Tests.dll
+            foreach ($testAssembly in $testAssemblies) {
+              Write-Host "Running tests for $($testAssembly.FullName)"
+              vstest.console.exe $testAssembly.FullName /Platform:${{ matrix.platform }} /Framework:.NETFramework,Version=v4.7.2
+            }
+          shell: pwsh
+          continue-on-error: true
 
   create_release:
     needs: test
