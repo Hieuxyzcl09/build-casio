@@ -23,7 +23,7 @@ jobs:
         fetch-depth: 0
 
     - name: Setup Visual Studio
-      uses: microsoft/setup-msbuild@v1.3.1
+      uses: microsoft/setup-msbuild@v1.3.2
 
     - name: Install Visual Studio components and SDK
       run: |
@@ -80,7 +80,7 @@ jobs:
         fetch-depth: 0
 
     - name: Setup NuGet
-      uses: NuGet/setup-nuget@v1
+      uses: NuGet/setup-nuget@v2.0.0
 
     - name: Cache NuGet packages
       uses: actions/cache@v4
@@ -114,18 +114,15 @@ jobs:
         path: CasioEmuMsvc
         fetch-depth: 0
 
-    - name: Setup .NET SDK
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: |
-          5.0.x
-          6.0.x
-          7.0.x
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.3.2
+
+    - name: Setup Visual Studio Developer Command Prompt
+      uses: ilammy/msvc-dev-cmd@v1
 
     - name: Run Code Analysis
       run: |
-        dotnet add $env:GITHUB_WORKSPACE\CasioEmuMsvc\CasioEmuMsvc.sln package Microsoft.CodeAnalysis.NetAnalyzers
-        dotnet build $env:GITHUB_WORKSPACE\CasioEmuMsvc\CasioEmuMsvc.sln /p:RunAnalyzersDuringBuild=true /p:AnalysisLevel=latest
+        msbuild $env:GITHUB_WORKSPACE\CasioEmuMsvc\CasioEmuMsvc.sln /t:Rebuild /p:RunCodeAnalysis=true /p:Configuration=Release /p:Platform=x64
       continue-on-error: true
       shell: pwsh
 
@@ -144,6 +141,9 @@ jobs:
         repository: telecomadm1145/CasioEmuMsvc
         path: CasioEmuMsvc
         fetch-depth: 0
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.3.2
 
     - name: Setup Visual Studio Developer Command Prompt
       uses: ilammy/msvc-dev-cmd@v1
@@ -165,13 +165,12 @@ jobs:
         Get-ChildItem -Path $env:GITHUB_WORKSPACE\CasioEmuMsvc -Filter *.sln -Recurse | ForEach-Object {
           $solutionFile = $_.FullName
           Write-Host "Building solution: $solutionFile"
-          nuget restore $solutionFile
-          msbuild $solutionFile /t:rebuild /p:Configuration=${{ matrix.configuration }} /p:Platform="${{ matrix.platform }}" /m /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true /p:UseSharedCompilation=true /p:BuildInParallel=true /p:ContinuousIntegrationBuild=true /v:minimal /fl "/flp:logfile=msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log;verbosity=diagnostic" /p:TreatWarningsAsErrors=true
+          msbuild $solutionFile /t:Restore,Rebuild /p:Configuration=${{ matrix.configuration }} /p:Platform="${{ matrix.platform }}" /m /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true /p:UseSharedCompilation=true /p:BuildInParallel=true /p:ContinuousIntegrationBuild=true /v:minimal /fl "/flp:logfile=msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log;verbosity=diagnostic" /p:TreatWarningsAsErrors=true
         }
       shell: pwsh
 
     - name: Upload build logs
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: build-logs-${{ matrix.configuration }}-${{ matrix.platform }}
         path: msbuild_${{ matrix.configuration }}_${{ matrix.platform }}.log
@@ -194,7 +193,7 @@ jobs:
       shell: pwsh
 
     - name: Upload build outputs
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: build-outputs-${{ matrix.configuration }}-${{ matrix.platform }}
         path: ${{ github.workspace }}\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}
@@ -230,7 +229,7 @@ jobs:
       shell: pwsh
 
     - name: Download build outputs
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: build-outputs-${{ matrix.configuration }}-${{ matrix.platform }}
         path: ${{ github.workspace }}\BuildOutputs\${{ matrix.configuration }}\${{ matrix.platform }}
@@ -264,7 +263,7 @@ jobs:
     runs-on: windows-latest
     steps:
     - name: Download all build outputs
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: BuildOutputs
 
