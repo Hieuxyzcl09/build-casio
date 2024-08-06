@@ -102,16 +102,23 @@ jobs:
 
     - name: Fix import statements and update specific files
       run: |
+        set -e
+
         fix_imports() {
           local file=$1
-          sed -i '1h;1d;$G' "$file"
-          imports=$(grep -E '^import' "$file" | sort -u)
+          # Lưu trữ package statement
+          local package_line=$(grep -E '^package' "$file")
+          # Xóa package statement và sắp xếp các import
+          sed -i '/^package/d' "$file"
+          local imports=$(grep -E '^import' "$file" | sort -u)
+          # Xóa tất cả các import hiện tại
           sed -i '/^import/d' "$file"
-          if [ -n "$imports" ]; then
-            sed -i "/^package/a $imports\n" "$file"
-          fi
+          # Thêm lại package statement và các import đã sắp xếp
+          { echo "$package_line"; echo "$imports"; cat "$file"; } > "${file}.tmp"
+          mv "${file}.tmp" "$file"
         }
 
+        # Fix imports cho tất cả các file Kotlin
         find . -name "*.kt" -type f | while read -r file; do
           fix_imports "$file"
         done
@@ -279,12 +286,15 @@ jobs:
 
         GRADLE_PROPERTIES="gradle.properties"
         if [ -f "$GRADLE_PROPERTIES" ]; then
-          echo "android.useAndroidX=true" >> "$GRADLE_PROPERTIES"
-          echo "android.enableJetifier=true" >> "$GRADLE_PROPERTIES"
+          # Kiểm tra xem các dòng đã tồn tại chưa trước khi thêm
+          grep -qxF "android.useAndroidX=true" "$GRADLE_PROPERTIES" || echo "android.useAndroidX=true" >> "$GRADLE_PROPERTIES"
+          grep -qxF "android.enableJetifier=true" "$GRADLE_PROPERTIES" || echo "android.enableJetifier=true" >> "$GRADLE_PROPERTIES"
           echo "Updated gradle.properties"
         else
           echo "Warning: gradle.properties not found"
         fi
+
+        echo "All updates completed successfully."
 
     - name: Translate strings
       run: |
