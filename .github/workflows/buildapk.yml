@@ -126,7 +126,7 @@ jobs:
         # Update FirstFragment.kt
         FIRST_FRAGMENT=$(find . -name "FirstFragment.kt")
         if [ -n "$FIRST_FRAGMENT" ]; then
-          cat > "$FIRST_FRAGMENT" <<EOL
+          cat > "$FIRST_FRAGMENT" << 'EOL'
 package casiocalchacking.casioemu
 
 import android.os.Bundle
