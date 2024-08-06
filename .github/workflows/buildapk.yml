@@ -100,6 +100,23 @@ jobs:
           sed -i "/super.onCreate/a $VERIFICATION_CODE" "$MAIN_FILE"
         fi
 
+    - name: Fix Kotlin files
+      run: |
+        fix_kotlin_file() {
+          local FILE=$1
+          echo "Fixing Kotlin file: $FILE"
+          # Move all import statements to the top of the file
+          sed -i '1h;1d;/^import/H;/^import/d;$G' "$FILE"
+          # Remove duplicate import statements
+          sort -u -o "$FILE" "$FILE"
+          echo "Fixed $FILE"
+        }
+        
+        KOTLIN_FILES=$(find . -name "*.kt")
+        for FILE in $KOTLIN_FILES; do
+          fix_kotlin_file "$FILE"
+        done
+
     - name: Translate strings
       run: |
         TARGET_LANG="${{ github.event.inputs.target_language }}"
@@ -175,7 +192,7 @@ jobs:
       run: |
         export ANDROID_SDK_ROOT=$ANDROID_HOME
         ./gradlew clean
-        ./gradlew assembleRelease --warning-mode all
+        ./gradlew assembleRelease --warning-mode all --stacktrace
         
         mkdir -p apks
         
