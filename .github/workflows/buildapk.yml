@@ -46,25 +46,32 @@ jobs:
         echo "PART2=$PART2" >> $GITHUB_ENV
         echo "PART3=$PART3" >> $GITHUB_ENV
 
-    - name: Find and Modify Files
+    - name: Find and Modify Kotlin Files
       run: |
-        FILES=$(find . -type f \( -name "*.java" -o -name "*.kt" \))
+        FILES=$(find . -type f -name "*.kt")
         FILE_COUNT=$(echo "$FILES" | wc -l)
-        FILE1=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
-        FILE2=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
-        FILE3=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
+        
+        select_unique_file() {
+          while true; do
+            FILE=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
+            if [[ ! " ${SELECTED_FILES[@]} " =~ " ${FILE} " ]]; then
+              SELECTED_FILES+=("$FILE")
+              echo "$FILE"
+              break
+            fi
+          done
+        }
+        
+        SELECTED_FILES=()
+        FILE1=$(select_unique_file)
+        FILE2=$(select_unique_file)
+        FILE3=$(select_unique_file)
         
         modify_file() {
           local FILE=$1
           local PART=$2
-          local CONTENT
-          if [[ $FILE == *.java ]]; then
-            CONTENT="private static final String VERIFY_PART$PART = \"${!PART}\";"
-            sed -i "/package/a $CONTENT" "$FILE"
-          else
-            CONTENT="val VERIFY_PART$PART = \"${!PART}\""
-            sed -i "/package/a $CONTENT" "$FILE"
-          fi
+          local CONTENT="val VERIFY_PART$PART = \"${!PART}\""
+          sed -i "/package/a $CONTENT" "$FILE"
           echo "Modified $FILE"
         }
         
@@ -72,7 +79,7 @@ jobs:
         modify_file "$FILE2" "PART2"
         modify_file "$FILE3" "PART3"
         
-        MAIN_FILE=$(grep -R -l "class.*extends.*Activity" . | head -n 1)
+        MAIN_FILE=$(grep -R -l "class.*:.*Activity()" . | head -n 1)
         if [ -z "$MAIN_FILE" ]; then
           echo "Warning: Could not find MainActivity or main Activity file"
         else
@@ -108,7 +115,7 @@ jobs:
           # Move all import statements to the top of the file
           sed -i '1h;1d;/^import/H;/^import/d;$G' "$FILE"
           # Remove duplicate import statements
-          sort -u -o "$FILE" "$FILE"
+          awk '!seen[$0]++' "$FILE" > "${FILE}.tmp" && mv "${FILE}.tmp" "$FILE"
           echo "Fixed $FILE"
         }
         
@@ -157,24 +164,28 @@ jobs:
 
     - name: Modify build.gradle files
       run: |
-        GRADLE_FILES=$(find . -name "build.gradle")
+        GRADLE_FILES=$(find . -name "build.gradle.kts")
         for FILE in $GRADLE_FILES; do
           echo "Modifying file: $FILE"
-          sed -i '/android {/a\
-            defaultConfig {\
-                ndk {\
-                    abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"\
-                }\
-            }\
-            splits {\
-                abi {\
-                    enable true\
-                    reset()\
-                    include "armeabi-v7a", "arm64-v8a", "x86", "x86_64"\
-                    universalApk true\
-                }\
-            }' "$FILE"
-          echo "Modified $FILE"
+          if ! grep -q "abiFilters" "$FILE"; then
+            sed -i '/android {/a\
+              defaultConfig {\
+                  ndk {\
+                      abiFilters("armeabi-v7a", "arm64-v8a", "x86", "x86_64")\
+                  }\
+              }\
+              splits {\
+                  abi {\
+                      isEnable = true\
+                      reset()\
+                      include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")\
+                      isUniversalApk = true\
+                  }\
+              }' "$FILE"
+            echo "Modified $FILE"
+          else
+            echo "File $FILE already contains ABI configuration, skipping modification"
+          fi
         done
 
     - name: Cache Gradle packages
@@ -209,6 +220,10 @@ jobs:
           mkdir -p "$(dirname "$OUTPUT")"
           
           ZIPALIGN="$(find $ANDROID_HOME/build-tools -name zipalign | sort -r | head -n 1)"
+          if [ -z "$ZIPALIGN" ]; then
+            echo "Error: zipalign tool not found"
+            exit 1
+          fi
           
           if ! "$ZIPALIGN" -v 4 "$INPUT" "$OUTPUT"; then
             echo "Error: zipalign failed for $INPUT"
@@ -221,6 +236,10 @@ jobs:
           fi
           
           APKSIGNER="$(find $ANDROID_HOME/build-tools -name apksigner | sort -r | head -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "Error: apksigner tool not found"
+            exit 1
+          fi
           
           if ! "$APKSIGNER" sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android "$OUTPUT"; then
             echo "Error: apksigner failed for $OUTPUT"
