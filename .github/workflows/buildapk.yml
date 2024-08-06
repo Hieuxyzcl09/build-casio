@@ -46,16 +46,14 @@ jobs:
         echo "PART2=$PART2" >> $GITHUB_ENV
         echo "PART3=$PART3" >> $GITHUB_ENV
 
-    - name: Install GNU sed
+    - name: Install GNU awk
       run: |
-        if ! command -v gsed &> /dev/null; then
+        if ! command -v gawk &> /dev/null; then
           if [[ "$OSTYPE" == "darwin"* ]]; then
-            brew install gnu-sed
-            echo 'alias sed=gsed' >> ~/.bash_profile
-            source ~/.bash_profile
+            brew install gawk
           elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
             sudo apt-get update
-            sudo apt-get install -y sed
+            sudo apt-get install -y gawk
           else
             echo "Unsupported operating system"
             exit 1
@@ -87,9 +85,10 @@ jobs:
           local FILE=$1
           local PART=$2
           local CONTENT="val VERIFY_PART$PART = \"${!PART}\""
-          sed -i.bak "/package/a\\
-          $CONTENT" "$FILE"
-          mv "$FILE.bak" "$FILE"
+          awk -v content="$CONTENT" '
+            /^package/ {print; print content; next}
+            {print}
+          ' "$FILE" > "${FILE}.tmp" && mv "${FILE}.tmp" "$FILE"
           echo "Modified $FILE"
         }
         
@@ -122,9 +121,10 @@ jobs:
         }
         android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show()
           '
-          sed -i.bak "/super.onCreate/a\\
-          $VERIFICATION_CODE" "$MAIN_FILE"
-          mv "$MAIN_FILE.bak" "$MAIN_FILE"
+          awk -v code="$VERIFICATION_CODE" '
+            /super\.onCreate/ {print; print code; next}
+            {print}
+          ' "$MAIN_FILE" > "${MAIN_FILE}.tmp" && mv "${MAIN_FILE}.tmp" "$MAIN_FILE"
         fi
 
     - name: Fix Kotlin files
