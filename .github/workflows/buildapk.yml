@@ -63,7 +63,7 @@ jobs:
             sed -i "/package/a $CONTENT" "$FILE"
           else
             CONTENT="val VERIFY_PART$PART = \"${!PART}\""
-            sed -i "/package/a\n$CONTENT" "$FILE"
+            sed -i "/package/a $CONTENT" "$FILE"
           fi
           echo "Modified $FILE"
         }
@@ -388,9 +388,9 @@ EOL
           
           mkdir -p "$(dirname "$OUTPUT")"
           
-          ZIPALIGN="${ANDROID_HOME}/build-tools/*/zipalign"
+          ZIPALIGN="$(find $ANDROID_HOME/build-tools -name zipalign | sort -r | head -n 1)"
           
-          if ! $ZIPALIGN -v 4 "$INPUT" "$OUTPUT"; then
+          if ! "$ZIPALIGN" -v 4 "$INPUT" "$OUTPUT"; then
             echo "Error: zipalign failed for $INPUT"
             return 1
           fi
@@ -400,9 +400,9 @@ EOL
             keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
           
-          APKSIGNER="${ANDROID_HOME}/build-tools/*/apksigner"
+          APKSIGNER="$(find $ANDROID_HOME/build-tools -name apksigner | sort -r | head -n 1)"
           
-          if ! $APKSIGNER sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android "$OUTPUT"; then
+          if ! "$APKSIGNER" sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android "$OUTPUT"; then
             echo "Error: apksigner failed for $OUTPUT"
             return 1
           fi
@@ -443,14 +443,12 @@ EOL
         prerelease: false
 
     - name: Upload Release Assets
-      uses: actions/upload-release-asset@v1
+      uses: softprops/action-gh-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./apks
-        asset_name: apks.zip
-        asset_content_type: application/zip
+        files: ./apks/*.apk
+        tag_name: v${{ github.run_number }}
 
     - name: Cleanup Gradle Cache
       run: |
