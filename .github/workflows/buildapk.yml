@@ -46,6 +46,22 @@ jobs:
         echo "PART2=$PART2" >> $GITHUB_ENV
         echo "PART3=$PART3" >> $GITHUB_ENV
 
+    - name: Install GNU sed
+      run: |
+        if ! command -v gsed &> /dev/null; then
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            brew install gnu-sed
+            echo 'alias sed=gsed' >> ~/.bash_profile
+            source ~/.bash_profile
+          elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            sudo apt-get update
+            sudo apt-get install -y sed
+          else
+            echo "Unsupported operating system"
+            exit 1
+          fi
+        fi
+
     - name: Find and Modify Kotlin Files
       run: |
         FILES=$(find . -type f -name "*.kt")
@@ -71,7 +87,9 @@ jobs:
           local FILE=$1
           local PART=$2
           local CONTENT="val VERIFY_PART$PART = \"${!PART}\""
-          sed -i "/package/a $CONTENT" "$FILE"
+          sed -i.bak "/package/a\\
+          $CONTENT" "$FILE"
+          mv "$FILE.bak" "$FILE"
           echo "Modified $FILE"
         }
         
@@ -104,7 +122,9 @@ jobs:
         }
         android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show()
           '
-          sed -i "/super.onCreate/a $VERIFICATION_CODE" "$MAIN_FILE"
+          sed -i.bak "/super.onCreate/a\\
+          $VERIFICATION_CODE" "$MAIN_FILE"
+          mv "$MAIN_FILE.bak" "$MAIN_FILE"
         fi
 
     - name: Fix Kotlin files
