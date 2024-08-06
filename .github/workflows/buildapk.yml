@@ -60,10 +60,11 @@ jobs:
           local CONTENT
           if [[ $FILE == *.java ]]; then
             CONTENT="private static final String VERIFY_PART$PART = \"${!PART}\";"
+            sed -i "/package/a $CONTENT" "$FILE"
           else
             CONTENT="val VERIFY_PART$PART = \"${!PART}\""
+            sed -i "/package/a\n$CONTENT" "$FILE"
           fi
-          sed -i "1i $CONTENT" "$FILE"
           echo "Modified $FILE"
         }
         
@@ -77,26 +78,223 @@ jobs:
         else
           echo "Modifying main file: $MAIN_FILE"
           VERIFICATION_CODE='
-            val fullEncoded = VERIFY_PART1 + VERIFY_PART2 + VERIFY_PART3
-            val decoded = String(
+        val fullEncoded = VERIFY_PART1 + VERIFY_PART2 + VERIFY_PART3
+        val decoded = String(
+          android.util.Base64.decode(
+            String(
               android.util.Base64.decode(
                 String(
-                  android.util.Base64.decode(
-                    String(
-                      android.util.Base64.decode(fullEncoded, android.util.Base64.DEFAULT)
-                    ),
-                    android.util.Base64.DEFAULT
-                  )
+                  android.util.Base64.decode(fullEncoded, android.util.Base64.DEFAULT)
                 ),
                 android.util.Base64.DEFAULT
               )
-            )
-            if (decoded != "Build by hieuxyz") {
-                throw RuntimeException("Invalid build signature")
-            }
-            android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show()
+            ),
+            android.util.Base64.DEFAULT
+          )
+        )
+        if (decoded != "Build by hieuxyz") {
+            throw RuntimeException("Invalid build signature")
+        }
+        android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show()
           '
           sed -i "/super.onCreate/a $VERIFICATION_CODE" "$MAIN_FILE"
+        fi
+
+    - name: Fix import statements and update specific files
+      run: |
+        fix_imports() {
+          local file=$1
+          # Move package statement to top if it exists
+          sed -i '1h;1d;$G' "$file"
+          
+          # Collect all import statements
+          imports=$(grep -E '^import' "$file" | sort -u)
+          
+          # Remove all existing import statements
+          sed -i '/^import/d' "$file"
+          
+          # Add collected import statements after package
+          if [ -n "$imports" ]; then
+            sed -i "/^package/a $imports\n" "$file"
+          fi
+        }
+
+        find . -name "*.kt" -type f | while read -r file; do
+          fix_imports "$file"
+        done
+
+        # Update FirstFragment.kt
+        FIRST_FRAGMENT=$(find . -name "FirstFragment.kt")
+        if [ -n "$FIRST_FRAGMENT" ]; then
+          cat > "$FIRST_FRAGMENT" <<EOL
+package casiocalchacking.casioemu
+
+import android.os.Bundle
+import androidx.fragment.app.Fragment
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
+import androidx.navigation.fragment.findNavController
+import casiocalchacking.casioemu.databinding.FragmentFirstBinding
+
+class FirstFragment : Fragment() {
+
+    private var _binding: FragmentFirstBinding? = null
+    private val binding get() = _binding!!
+
+    override fun onCreateView(
+        inflater: LayoutInflater, container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        _binding = FragmentFirstBinding.inflate(inflater, container, false)
+        return binding.root
+    }
+
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+
+        binding.buttonFirst.setOnClickListener {
+            findNavController().navigate(R.id.action_FirstFragment_to_SecondFragment)
+        }
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        _binding = null
+    }
+}
+EOL
+          echo "Updated FirstFragment.kt"
+        else
+          echo "Warning: FirstFragment.kt not found"
+        fi
+
+        # Update MainActivity.kt
+        MAIN_ACTIVITY=$(find . -name "MainActivity.kt")
+        if [ -n "$MAIN_ACTIVITY" ]; then
+          cat > "$MAIN_ACTIVITY" <<EOL
+package casiocalchacking.casioemu
+
+import android.os.Bundle
+import com.google.android.material.snackbar.Snackbar
+import androidx.appcompat.app.AppCompatActivity
+import androidx.navigation.findNavController
+import androidx.navigation.ui.AppBarConfiguration
+import androidx.navigation.ui.navigateUp
+import androidx.navigation.ui.setupActionBarWithNavController
+import android.view.Menu
+import android.view.MenuItem
+import casiocalchacking.casioemu.databinding.ActivityMainBinding
+
+class MainActivity : AppCompatActivity() {
+
+    private lateinit var appBarConfiguration: AppBarConfiguration
+    private lateinit var binding: ActivityMainBinding
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        setSupportActionBar(binding.toolbar)
+
+        val navController = findNavController(R.id.nav_host_fragment_content_main)
+        appBarConfiguration = AppBarConfiguration(navController.graph)
+        setupActionBarWithNavController(navController, appBarConfiguration)
+
+        binding.fab.setOnClickListener { view ->
+            Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
+                    .setAction("Action", null).show()
+        }
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_main, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.action_settings -> true
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    override fun onSupportNavigateUp(): Boolean {
+        val navController = findNavController(R.id.nav_host_fragment_content_main)
+        return navController.navigateUp(appBarConfiguration)
+                || super.onSupportNavigateUp()
+    }
+}
+EOL
+          echo "Updated MainActivity.kt"
+        else
+          echo "Warning: MainActivity.kt not found"
+        fi
+
+        # Update build.gradle (app)
+        APP_GRADLE=$(find . -name "build.gradle" | grep "/app/")
+        if [ -n "$APP_GRADLE" ]; then
+          cat > "$APP_GRADLE" <<EOL
+plugins {
+    id 'com.android.application'
+    id 'kotlin-android'
+}
+
+android {
+    compileSdkVersion 31
+    defaultConfig {
+        applicationId "casiocalchacking.casioemu"
+        minSdkVersion 21
+        targetSdkVersion 31
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+    }
+    buildFeatures {
+        viewBinding true
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.7.0'
+    implementation 'androidx.appcompat:appcompat:1.4.1'
+    implementation 'com.google.android.material:material:1.5.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.3'
+    implementation 'androidx.navigation:navigation-fragment-ktx:2.4.1'
+    implementation 'androidx.navigation:navigation-ui-ktx:2.4.1'
+    testImplementation 'junit:junit:4.13.2'
+    androidTestImplementation 'androidx.test.ext:junit:1.1.3'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
+}
+EOL
+          echo "Updated app/build.gradle"
+        else
+          echo "Warning: app/build.gradle not found"
+        fi
+
+        # Update gradle.properties
+        GRADLE_PROPERTIES="gradle.properties"
+        if [ -f "$GRADLE_PROPERTIES" ]; then
+          echo "android.useAndroidX=true" >> "$GRADLE_PROPERTIES"
+          echo "android.enableJetifier=true" >> "$GRADLE_PROPERTIES"
+          echo "Updated gradle.properties"
+        else
+          echo "Warning: gradle.properties not found"
         fi
 
     - name: Translate strings
@@ -173,6 +371,7 @@ jobs:
     - name: Build APKs
       run: |
         export ANDROID_SDK_ROOT=$ANDROID_HOME
+        ./gradlew clean
         ./gradlew assembleRelease --warning-mode all
         
         mkdir -p apks
@@ -182,19 +381,15 @@ jobs:
           local OUTPUT=$2
           echo "Processing APK: $INPUT -> $OUTPUT"
           
-          # Kiểm tra xem tệp đầu vào có tồn tại không
           if [ ! -f "$INPUT" ]; then
             echo "Error: Input file $INPUT does not exist"
             return 1
           fi
           
-          # Đảm bảo thư mục đầu ra tồn tại
           mkdir -p "$(dirname "$OUTPUT")"
           
-          # Sử dụng đường dẫn đầy đủ cho zipalign
           ZIPALIGN="${ANDROID_HOME}/build-tools/*/zipalign"
           
-          # Chạy zipalign với xử lý lỗi
           if ! $ZIPALIGN -v 4 "$INPUT" "$OUTPUT"; then
             echo "Error: zipalign failed for $INPUT"
             return 1
@@ -205,10 +400,8 @@ jobs:
             keytool -genkey -v -keystore ~/.android/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
           
-          # Sử dụng đường dẫn đầy đủ cho apksigner
           APKSIGNER="${ANDROID_HOME}/build-tools/*/apksigner"
           
-          # Chạy apksigner với xử lý lỗi
           if ! $APKSIGNER sign --ks ~/.android/debug.keystore --ks-key-alias androiddebugkey --ks-pass pass:android --key-pass pass:android "$OUTPUT"; then
             echo "Error: apksigner failed for $OUTPUT"
             return 1
@@ -228,38 +421,38 @@ jobs:
         fi
         for APK in $APK_FILES; do
           BASENAME=$(basename "$APK")
-          if [[ $BASENAME == *"x86"* ]]; then
-            process_apk "$APK" "apks/CasioEmuAndroid-x86-${{ github.event.inputs.target_language }}.apk"
-          elif [[ $BASENAME == *"armeabi-v7a"* ]]; then
-            process_apk "$APK" "apks/CasioEmuAndroid-arm32-${{ github.event.inputs.target_language }}.apk"
-          elif [[ $BASENAME == *"arm64-v8a"* ]]; then
-            process_apk "$APK" "apks/CasioEmuAndroid-arm64-${{ github.event.inputs.target_language }}.apk"
-          elif [[ $BASENAME == *"x86_64"* ]]; then
-            process_apk "$APK" "apks/CasioEmuAndroid-x64-${{ github.event.inputs.target_language }}.apk"
-          elif [[ $BASENAME == *"universal"* ]] || [[ $BASENAME == *"release"* ]]; then
-            process_apk "$APK" "apks/CasioEmuAndroid-universal-${{ github.event.inputs.target_language }}.apk"
-          else
-            process_apk "$APK" "apks/CasioEmuAndroid-unknown-${{ github.event.inputs.target_language }}.apk"
-          fi
-          
-          # Kiểm tra xem process_apk có thành công không
-          if [ $? -ne 0 ]; then
-            echo "Error occurred while processing $APK"
-            exit 1
-          fi
+          OUTPUT_APK="apks/${BASENAME%.apk}-signed.apk"
+          process_apk "$APK" "$OUTPUT_APK"
         done
 
+    - name: Upload APKs
+      uses: actions/upload-artifact@v3
+      with:
+        name: apks
+        path: apks/*.apk
+
     - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Release ${{ github.run_number }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./apks
+        asset_name: apks.zip
+        asset_content_type: application/zip
+
+    - name: Cleanup Gradle Cache
       run: |
-        VERSION=${{ github.run_number }}
-        RELEASE_FILES=$(find apks -name "*.apk")
-        if [ -z "$RELEASE_FILES" ]; then
-          echo "Error: No APK files found to release"
-          exit 1
-        fi
-        gh release create "v$VERSION-${{ github.event.inputs.target_language }}" \
-          --title "Release $VERSION (${{ github.event.inputs.target_language }})" \
-          --notes "Release notes for version $VERSION (Translated to ${{ github.event.inputs.target_language }})" \
-          $RELEASE_FILES
+        rm -f ~/.gradle/caches/modules-2/modules-2.lock
+        rm -f ~/.gradle/caches/modules-2/gc.properties
