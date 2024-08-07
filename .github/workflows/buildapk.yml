@@ -2,29 +2,24 @@ name: Build, Translate, and Release APK
 
 on:
   workflow_dispatch:
-    inputs:
-      target_language:
-        description: 'Target language for translation (e.g., vi for Vietnamese)'
-        required: true
-        default: 'vi'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout CasioEmuAndroid repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: telecomadm1145/CasioEmuAndroid
 
     - name: Set up JDK 17
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'adopt'
 
     - name: Set up Android SDK
-      uses: android-actions/setup-android@v2
+      uses: android-actions/setup-android@v3
 
     - name: Accept Android SDK licenses
       run: yes | sdkmanager --licenses
@@ -35,196 +30,24 @@ jobs:
         sudo apt-get install -y gettext python3-pip
         pip3 install googletrans==3.1.0a0
 
-    - name: Encode and split verification message
-      run: |
-        MESSAGE="Build by hieuxyz"
-        ENCODED=$(echo -n "$MESSAGE" | base64 | base64 | base64)
-        PART1="${ENCODED:0:10}"
-        PART2="${ENCODED:10:10}"
-        PART3="${ENCODED:20}"
-        echo "PART1=$PART1" >> $GITHUB_ENV
-        echo "PART2=$PART2" >> $GITHUB_ENV
-        echo "PART3=$PART3" >> $GITHUB_ENV
-
-    - name: Install GNU awk
-      run: |
-        if ! command -v gawk &> /dev/null; then
-          if [[ "$OSTYPE" == "darwin"* ]]; then
-            brew install gawk
-          elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-            sudo apt-get update
-            sudo apt-get install -y gawk
-          else
-            echo "Unsupported operating system"
-            exit 1
-          fi
-        fi
-
-    - name: Find and Modify Kotlin Files
-      run: |
-        FILES=$(find . -type f -name "*.kt")
-        FILE_COUNT=$(echo "$FILES" | wc -l)
-        
-        select_unique_file() {
-          while true; do
-            FILE=$(echo "$FILES" | sed -n "$(( RANDOM % FILE_COUNT + 1 ))p")
-            if [[ ! " ${SELECTED_FILES[@]} " =~ " ${FILE} " ]]; then
-              SELECTED_FILES+=("$FILE")
-              echo "$FILE"
-              break
-            fi
-          done
-        }
-        
-        SELECTED_FILES=()
-        FILE1=$(select_unique_file)
-        FILE2=$(select_unique_file)
-        FILE3=$(select_unique_file)
-        
-        modify_file() {
-          local FILE=$1
-          local PART=$2
-          local CONTENT="val VERIFY_PART$PART = \"${!PART}\""
-          awk -v content="$CONTENT" '
-            /^package/ {print; print content; next}
-            {print}
-          ' "$FILE" > "${FILE}.tmp" && mv "${FILE}.tmp" "$FILE"
-          echo "Modified $FILE"
-        }
-        
-        modify_file "$FILE1" "PART1"
-        modify_file "$FILE2" "PART2"
-        modify_file "$FILE3" "PART3"
-        
-        MAIN_FILE=$(grep -R -l "class.*:.*Activity()" . | head -n 1)
-        if [ -z "$MAIN_FILE" ]; then
-          echo "Warning: Could not find MainActivity or main Activity file"
-        else
-          echo "Modifying main file: $MAIN_FILE"
-          VERIFICATION_CODE='
-        val fullEncoded = VERIFY_PART1 + VERIFY_PART2 + VERIFY_PART3
-        val decoded = String(
-          android.util.Base64.decode(
-            String(
-              android.util.Base64.decode(
-                String(
-                  android.util.Base64.decode(fullEncoded, android.util.Base64.DEFAULT)
-                ),
-                android.util.Base64.DEFAULT
-              )
-            ),
-            android.util.Base64.DEFAULT
-          )
-        )
-        if (decoded != "Build by hieuxyz") {
-            throw RuntimeException("Invalid build signature")
-        }
-        android.widget.Toast.makeText(this, decoded, android.widget.Toast.LENGTH_LONG).show()
-          '
-          awk -v code="$VERIFICATION_CODE" '
-            /super\.onCreate/ {print; print code; next}
-            {print}
-          ' "$MAIN_FILE" > "${MAIN_FILE}.tmp" && mv "${MAIN_FILE}.tmp" "$MAIN_FILE"
-        fi
-
-    - name: Fix Kotlin files
-      run: |
-        fix_kotlin_file() {
-          local FILE=$1
-          echo "Fixing Kotlin file: $FILE"
-          # Move all import statements to the top of the file
-          sed -i '1h;1d;/^import/H;/^import/d;$G' "$FILE"
-          # Remove duplicate import statements
-          awk '!seen[$0]++' "$FILE" > "${FILE}.tmp" && mv "${FILE}.tmp" "$FILE"
-          echo "Fixed $FILE"
-        }
-        
-        KOTLIN_FILES=$(find . -name "*.kt")
-        for FILE in $KOTLIN_FILES; do
-          fix_kotlin_file "$FILE"
-        done
-
-    - name: Translate strings
-      run: |
-        TARGET_LANG="${{ github.event.inputs.target_language }}"
-        
-        translate_file() {
-          local FILE=$1
-          local BASENAME=$(basename "$FILE")
-          local DIR=$(dirname "$FILE")
-          local NEW_DIR="${DIR}-${TARGET_LANG}"
-          mkdir -p "$NEW_DIR"
-          local NEW_FILE="${NEW_DIR}/${BASENAME}"
-          
-          echo "Translating $FILE to $NEW_FILE"
-          
-          python3 - <<EOF
-        from googletrans import Translator
-        import xml.etree.ElementTree as ET
-        
-        translator = Translator()
-        tree = ET.parse('$FILE')
-        root = tree.getroot()
-        
-        for elem in root.iter():
-          if elem.text and not elem.text.strip().startswith('@'):
-            elem.text = translator.translate(elem.text, dest='$TARGET_LANG').text
-        
-        tree.write('$NEW_FILE', encoding='utf-8', xml_declaration=True)
-        EOF
-          
-          echo "Translated $FILE to $NEW_FILE"
-        }
-        
-        STRING_FILES=$(find . -name "strings.xml")
-        
-        for FILE in $STRING_FILES; do
-          translate_file "$FILE"
-        done
-
-    - name: Modify build.gradle files
-      run: |
-        GRADLE_FILES=$(find . -name "build.gradle.kts")
-        for FILE in $GRADLE_FILES; do
-          echo "Modifying file: $FILE"
-          if ! grep -q "abiFilters" "$FILE"; then
-            sed -i '/android {/a\
-              defaultConfig {\
-                  ndk {\
-                      abiFilters("armeabi-v7a", "arm64-v8a", "x86", "x86_64")\
-                  }\
-              }\
-              splits {\
-                  abi {\
-                      isEnable = true\
-                      reset()\
-                      include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")\
-                      isUniversalApk = true\
-                  }\
-              }' "$FILE"
-            echo "Modified $FILE"
-          else
-            echo "File $FILE already contains ABI configuration, skipping modification"
-          fi
-        done
-
-    - name: Cache Gradle packages
-      uses: actions/cache@v3
-      with:
-        path: ~/.gradle/caches
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
-
     - name: Grant execute permission for gradlew
       run: chmod +x ./gradlew
+
+    - name: Download dependencies
+      run: ./gradlew dependencies
 
     - name: Build APKs
       run: |
         export ANDROID_SDK_ROOT=$ANDROID_HOME
-        ./gradlew clean
-        ./gradlew assembleRelease --warning-mode all --stacktrace
-        
+        ./gradlew clean assembleRelease --no-daemon --warning-mode all --stacktrace
+
+    - name: List APK files
+      run: |
+        echo "APK files:"
+        find . -name "*.apk"
+
+    - name: Process APKs
+      run: |
         mkdir -p apks
         
         process_apk() {
@@ -308,8 +131,3 @@ jobs:
       with:
         files: ./apks/*.apk
         tag_name: v${{ github.run_number }}
-
-    - name: Cleanup Gradle Cache
-      run: |
-        rm -f ~/.gradle/caches/modules-2/modules-2.lock
-        rm -f ~/.gradle/caches/modules-2/gc.properties
